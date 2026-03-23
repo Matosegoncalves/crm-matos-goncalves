@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CRM — Matos & Gonçalves Advocacia</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',sans-serif;background:#F0F2F5;}
+  ::-webkit-scrollbar{width:6px;height:6px;}
+  ::-webkit-scrollbar-track{background:#F0F2F5;}
+  ::-webkit-scrollbar-thumb{background:#C0C4CC;border-radius:3px;}
+  select,input,textarea,button{font-family:inherit;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxySmvHdDURN053jBi0LJtwMQmOp777ktl8HLOsrU_bfIQnFGH0Ameq363VZMk4xFlm/exec";
+const USUARIO = "Dr. Marcelo Matos";
+
+// ── Fluxo financeiro ─────────────────────────────────────────
+// ESTIMADO   → lead em pipeline (novo_lead até proposta_enviada)
+// CONTRATO   → lead em cliente_ativo (valor do contrato firmado)
+// RECEBIDO   → lead encerrado COM pagamento registrado
+// SEM CONTRATO → lead encerrado SEM contrato (valor zerado, pode excluir)
+
+const AREAS = {
+  fraude_pix:        {label:"Fraude PIX",          color:"#E74C3C",bg:"#FDEDEC",icon:"₿"},
+  acidente_trabalho: {label:"Acidente de Trabalho",color:"#E67E22",bg:"#FEF9E7",icon:"⚕"},
+  credito_rural:     {label:"Crédito Rural",       color:"#27AE60",bg:"#EAFAF1",icon:"🌾"},
+  direito_digital:   {label:"Direito Digital",     color:"#2980B9",bg:"#EBF5FB",icon:"⚡"},
+  outros:            {label:"Outros",              color:"#7F8C8D",bg:"#F2F3F4",icon:"§"},
+};
+const ETAPAS = [
+  {id:"novo_lead",         label:"Novo Lead",         color:"#95A5A6", fase:"pipeline"},
+  {id:"triagem",           label:"Triagem",           color:"#F39C12", fase:"pipeline"},
+  {id:"consulta_agendada", label:"Consulta Agendada", color:"#8E44AD", fase:"pipeline"},
+  {id:"proposta_enviada",  label:"Proposta Enviada",  color:"#2980B9", fase:"pipeline"},
+  {id:"cliente_ativo",     label:"Cliente Ativo",     color:"#27AE60", fase:"contrato"},
+  {id:"encerrado",         label:"Encerrado",         color:"#7F8C8D", fase:"encerrado"},
+];
+const URGENCIAS = {
+  alta: {label:"Alta",  color:"#E74C3C",bg:"#FDEDEC"},
+  media:{label:"Média", color:"#E67E22",bg:"#FEF9E7"},
+  baixa:{label:"Baixa", color:"#27AE60",bg:"#EAFAF1"},
+};
+const ADVOGADOS = ["Dr. Marcelo Matos","Dra. Gonçalves","Dr. Associado"];
+const ORIGENS   = ["WhatsApp","Instagram","Indicação","Google","Site","Ligação"];
+const LEAD0 = {nome:"",telefone:"",area:"fraude_pix",etapa:"novo_lead",urgencia:"media",descricao:"",advogado:USUARIO,origem:"WhatsApp",valorEstimado:"",valorContrato:"",valorRecebido:"",data:new Date().toISOString().split("T")[0]};
+
+const fR = (v) => v ? `R$ ${Number(v).toLocaleString("pt-BR")}` : "—";
+const fD = (d) => {if(!d)return "—";const s=String(d);if(s.includes("/"))return s;return new Date(s+"T12:00:00").toLocaleDateString("pt-BR");};
+
+// Calcula o valor financeiro relevante de um lead conforme a etapa
+function valorRelevante(l) {
+  const fase = ETAPAS.find(e=>e.id===l.etapa)?.fase;
+  if (fase==="encerrado") return Number(l.valorRecebido)||0;
+  if (fase==="contrato")  return Number(l.valorContrato)||Number(l.valorEstimado)||0;
+  return Number(l.valorEstimado)||0;
+}
+
+async function api(acao, payload={}) {
+  const r = await fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({acao,payload})});
+  const j = await r.json();
+  if(!j.sucesso) throw new Error(j.erro||"Erro API");
+  return j.dados;
+}
+
+const S = {
+  btn:  (v="p")=>({padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,whiteSpace:"nowrap",background:v==="p"?"#2C3E6E":v==="g"?"#1A7F5A":v==="r"?"#E74C3C":v==="o"?"#F0F2F5":"#888",color:v==="o"?"#555":"#fff"}),
+  inp:  {width:"100%",padding:"9px 11px",borderRadius:8,border:"1.5px solid #E0E4EB",fontSize:13,color:"#1A1D2E",background:"#FAFBFC",outline:"none"},
+  sel:  {width:"100%",padding:"9px 11px",borderRadius:8,border:"1.5px solid #E0E4EB",fontSize:13,color:"#1A1D2E",background:"#FAFBFC",outline:"none",cursor:"pointer"},
+  lbl:  {fontSize:12,fontWeight:600,color:"#666",marginBottom:5,display:"block"},
+  badge:(a)=>({display:"inline-flex",alignItems:"center",gap:3,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,background:AREAS[a]?.bg||"#eee",color:AREAS[a]?.color||"#666"}),
+  urg:  (u)=>({display:"inline-block",padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:600,background:URGENCIAS[u]?.bg||"#eee",color:URGENCIAS[u]?.color||"#666"}),
+  etag: (e)=>{const et=ETAPAS.find(x=>x.id===e);return{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:(et?.color||"#999")+"22",color:et?.color||"#999"};},
+  card: {background:"#fff",borderRadius:14,padding:22,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginBottom:16},
+  mc:   (c)=>({background:"#fff",borderRadius:14,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",borderTop:`4px solid ${c}`}),
+};
+
+// ══════════════════════════════════════════════════════════════
+//  MODAL NOVO LEAD
+// ══════════════════════════════════════════════════════════════
+function Modal({onClose, onSave}) {
+  const [form,setForm]   = React.useState(LEAD0);
+  const [saving,setSaving]= React.useState(false);
+  const set = k => e => setForm(f=>({...f,[k]:e.target.value}));
+  const handle = async () => {
+    if(!form.nome||!form.telefone){alert("Nome e telefone obrigatórios.");return;}
+    setSaving(true); await onSave(form); setSaving(false); setForm(LEAD0);
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:30,width:500,maxHeight:"90vh",overflow:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22}}>
+          <div style={{fontSize:17,fontWeight:700}}>Novo Lead</div>
+          <button onClick={onClose} style={{background:"#F0F2F5",border:"none",width:30,height:30,borderRadius:7,cursor:"pointer",fontSize:19,lineHeight:1}}>×</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <div><label style={S.lbl}>Nome completo *</label><input style={S.inp} value={form.nome} onChange={set("nome")} placeholder="Nome do cliente"/></div>
+          <div><label style={S.lbl}>Telefone *</label><input style={S.inp} value={form.telefone} onChange={set("telefone")} placeholder="(62) 9..."/></div>
+          <div><label style={S.lbl}>Área do Direito</label>
+            <select style={S.sel} value={form.area} onChange={set("area")}>{Object.entries(AREAS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
+          <div><label style={S.lbl}>Urgência</label>
+            <select style={S.sel} value={form.urgencia} onChange={set("urgencia")}>{Object.entries(URGENCIAS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
+          <div><label style={S.lbl}>Advogado</label>
+            <select style={S.sel} value={form.advogado} onChange={set("advogado")}>{ADVOGADOS.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
+          <div><label style={S.lbl}>Origem</label>
+            <select style={S.sel} value={form.origem} onChange={set("origem")}>{ORIGENS.map(o=><option key={o} value={o}>{o}</option>)}</select></div>
+          <div><label style={S.lbl}>Valor Estimado (R$)</label><input style={S.inp} type="number" placeholder="0" value={form.valorEstimado} onChange={set("valorEstimado")}/></div>
+          <div><label style={S.lbl}>Data de Entrada</label><input style={S.inp} type="date" value={form.data} onChange={set("data")}/></div>
+        </div>
+        <div style={{marginTop:14}}><label style={S.lbl}>Descrição do Caso</label>
+          <textarea style={{...S.inp,minHeight:75,resize:"vertical"}} value={form.descricao} onChange={set("descricao")} placeholder="Descreva o caso brevemente..."/></div>
+        <div style={{display:"flex",gap:10,marginTop:22,justifyContent:"flex-end"}}>
+          <button style={{...S.btn("o"),border:"1.5px solid #E0E4EB"}} onClick={onClose}>Cancelar</button>
+          <button style={S.btn("p")} onClick={handle} disabled={saving}>{saving?"Salvando...":"Cadastrar Lead"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  MODAL ENCERRAR LEAD
+// ══════════════════════════════════════════════════════════════
+function ModalEncerrar({lead, onClose, onEncerrar, onExcluir}) {
+  const [tipo,   setTipo]  = React.useState("sem_contrato"); // "com_contrato" | "sem_contrato"
+  const [valor,  setValor] = React.useState(lead.valorContrato||lead.valorEstimado||"");
+  const [saving, setSaving]= React.useState(false);
+
+  const handle = async () => {
+    setSaving(true);
+    await onEncerrar(lead.id, tipo, valor);
+    setSaving(false);
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:30,width:440}}>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:6}}>Encerrar Lead</div>
+        <div style={{fontSize:13,color:"#666",marginBottom:22}}>{lead.nome}</div>
+
+        <div style={{display:"flex",gap:10,marginBottom:20}}>
+          {[["sem_contrato","Sem contrato","#E74C3C"],["com_contrato","Contrato firmado","#1A7F5A"]].map(([v,l,c])=>(
+            <div key={v} onClick={()=>setTipo(v)} style={{flex:1,padding:"14px 10px",borderRadius:10,border:`2px solid ${tipo===v?c:"#E0E4EB"}`,cursor:"pointer",textAlign:"center",background:tipo===v?c+"11":"#fff",transition:"all .15s"}}>
+              <div style={{fontSize:18,marginBottom:4}}>{v==="sem_contrato"?"✗":"✓"}</div>
+              <div style={{fontSize:13,fontWeight:700,color:tipo===v?c:"#555"}}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {tipo==="sem_contrato" && (
+          <div style={{background:"#FDEDEC",borderRadius:10,padding:14,marginBottom:20,fontSize:13,color:"#7B241C",lineHeight:1.6}}>
+            O valor estimado <strong>{fR(lead.valorEstimado)}</strong> será removido das previsões financeiras. O lead ficará arquivado como "Encerrado sem contrato".
+          </div>
+        )}
+
+        {tipo==="com_contrato" && (
+          <div style={{marginBottom:20}}>
+            <div style={{background:"#EAFAF1",borderRadius:10,padding:14,marginBottom:14,fontSize:13,color:"#1A5E3A",lineHeight:1.6}}>
+              Informe o valor efetivamente recebido neste caso. Ele será registrado em <strong>Receita Realizada</strong>.
+            </div>
+            <label style={S.lbl}>Valor Recebido (R$) *</label>
+            <input style={S.inp} type="number" placeholder="0,00" value={valor} onChange={e=>setValor(e.target.value)}/>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:10,justifyContent:"space-between"}}>
+          <button style={{...S.btn("r"),padding:"7px 14px",fontSize:12}} onClick={()=>{if(window.confirm("Excluir este lead permanentemente?")) onExcluir(lead.id);}}>
+            Excluir lead
+          </button>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...S.btn("o"),border:"1.5px solid #E0E4EB"}} onClick={onClose}>Cancelar</button>
+            <button style={S.btn(tipo==="com_contrato"?"g":"r")} onClick={handle} disabled={saving||( tipo==="com_contrato"&&!valor)}>
+              {saving?"Salvando...":tipo==="com_contrato"?"Confirmar Receita":"Encerrar sem contrato"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PAINEL LATERAL
+// ══════════════════════════════════════════════════════════════
+function Painel({lead, onClose, onUpdateCampo, onAddNota, onAbrirEncerrar}) {
+  const [nota,setNota] = React.useState("");
+  const hist = lead.historico||[];
+  const fase = ETAPAS.find(e=>e.id===lead.etapa)?.fase;
+  const handleAdd = () => {if(!nota.trim())return; onAddNota(lead.id,nota); setNota("");};
+
+  // Bloco financeiro conforme fase
+  const BlocoFinanceiro = () => {
+    if (fase==="pipeline") return (
+      <div style={{background:"#F8F9FB",borderRadius:10,padding:14,marginBottom:16}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Financeiro — Estimativa</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:11,color:"#999",marginBottom:2}}>Valor estimado</div>
+            <div style={{fontSize:18,fontWeight:800,color:"#2C3E6E"}}>{fR(lead.valorEstimado)}</div>
+          </div>
+          <div style={{fontSize:11,color:"#AAA",background:"#EEF2FF",padding:"4px 10px",borderRadius:6,fontWeight:600}}>ESTIMATIVA</div>
+        </div>
+      </div>
+    );
+    if (fase==="contrato") return (
+      <div style={{background:"#EAFAF1",borderRadius:10,padding:14,marginBottom:16,border:"1.5px solid #A9DFBF"}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#1A5E3A",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Financeiro — Contrato Firmado</div>
+        <div style={{display:"flex",gap:20}}>
+          <div>
+            <div style={{fontSize:11,color:"#1A5E3A",marginBottom:2}}>Valor contrato</div>
+            <div style={{fontSize:18,fontWeight:800,color:"#1A7F5A"}}>{fR(lead.valorContrato||lead.valorEstimado)}</div>
+          </div>
+          {lead.valorEstimado&&lead.valorContrato&&Number(lead.valorContrato)!==Number(lead.valorEstimado)&&(
+            <div>
+              <div style={{fontSize:11,color:"#999",marginBottom:2}}>Era estimado</div>
+              <div style={{fontSize:14,color:"#999",textDecoration:"line-through"}}>{fR(lead.valorEstimado)}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+    if (fase==="encerrado") {
+      const recebido = Number(lead.valorRecebido)||0;
+      return recebido>0 ? (
+        <div style={{background:"#EBF5FB",borderRadius:10,padding:14,marginBottom:16,border:"1.5px solid #AED6F1"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#154360",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Financeiro — Receita Realizada</div>
+          <div style={{fontSize:18,fontWeight:800,color:"#2980B9"}}>{fR(recebido)}</div>
+          <div style={{fontSize:11,color:"#5D6D7E",marginTop:4}}>Caso encerrado com pagamento registrado</div>
+        </div>
+      ) : (
+        <div style={{background:"#F2F3F4",borderRadius:10,padding:14,marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#666",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Financeiro</div>
+          <div style={{fontSize:13,color:"#999"}}>Encerrado sem contrato — sem receita registrada</div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div style={{position:"fixed",top:0,right:0,width:480,height:"100vh",background:"#fff",boxShadow:"-4px 0 24px rgba(0,0,0,0.14)",zIndex:100,display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"18px 22px",background:"#1A2444",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700,color:"#fff",marginBottom:3}}>{lead.nome}</div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{lead.telefone}</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {fase!=="encerrado" && (
+            <button onClick={onAbrirEncerrar} style={{background:"rgba(231,76,60,0.2)",border:"1px solid rgba(231,76,60,0.4)",color:"#E74C3C",padding:"5px 12px",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:600}}>
+              Encerrar
+            </button>
+          )}
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.12)",border:"none",color:"#fff",width:30,height:30,borderRadius:7,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflow:"auto",padding:20}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+          <span style={S.badge(lead.area)}>{AREAS[lead.area]?.icon} {AREAS[lead.area]?.label}</span>
+          <span style={S.urg(lead.urgencia)}>{URGENCIAS[lead.urgencia]?.label}</span>
+          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:600,background:"#EEF2FF",color:"#3B5BDB"}}>{lead.origem}</span>
+        </div>
+
+        {lead.descricao&&<div style={{background:"#F8F9FB",borderRadius:9,padding:12,marginBottom:16,fontSize:13,color:"#444",lineHeight:1.7}}>{lead.descricao}</div>}
+
+        <BlocoFinanceiro/>
+
+        {fase!=="encerrado" && (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            <div><label style={S.lbl}>Etapa</label>
+              <select style={S.sel} value={lead.etapa} onChange={e=>onUpdateCampo(lead.id,"etapa",e.target.value)}>
+                {ETAPAS.filter(et=>et.fase!=="encerrado").map(et=><option key={et.id} value={et.id}>{et.label}</option>)}
+              </select>
+            </div>
+            <div><label style={S.lbl}>Urgência</label>
+              <select style={S.sel} value={lead.urgencia} onChange={e=>onUpdateCampo(lead.id,"urgencia",e.target.value)}>
+                {Object.entries(URGENCIAS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+          {[["Advogado",lead.advogado],["Entrada",fD(lead.data)]].map(([k,v])=>(
+            <div key={k} style={{background:"#F8F9FB",borderRadius:8,padding:10}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>{k}</div>
+              <div style={{fontWeight:600,fontSize:13,color:"#1A1D2E"}}>{v||"—"}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>Histórico</div>
+        <div style={{maxHeight:180,overflow:"auto",marginBottom:12}}>
+          {[...hist].reverse().map((h,i)=>(
+            <div key={i} style={{display:"flex",gap:9,marginBottom:10,paddingBottom:10,borderBottom:i<hist.length-1?"1px solid #F5F7FA":"none"}}>
+              <div style={{width:30,height:30,borderRadius:7,background:"#EEF2FF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>
+                {h.tipo==="WhatsApp"?"💬":h.tipo==="Ligação"?"📞":h.tipo==="Email"?"✉️":"📝"}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,color:"#999",marginBottom:2}}>{h.data} · {h.tipo}</div>
+                <div style={{fontSize:13,color:"#444",lineHeight:1.5}}>{h.texto}</div>
+              </div>
+            </div>
+          ))}
+          {hist.length===0&&<div style={{color:"#CCC",fontSize:13,textAlign:"center",padding:12}}>Sem interações ainda.</div>}
+        </div>
+
+        {fase!=="encerrado"&&(
+          <div style={{display:"flex",gap:8}}>
+            <input style={{...S.inp,flex:1}} placeholder="Adicionar nota..." value={nota}
+              onChange={e=>setNota(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAdd()}/>
+            <button style={S.btn("g")} onClick={handleAdd}>+</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  APP
+// ══════════════════════════════════════════════════════════════
+function App() {
+  const [leads,    setLeads]    = React.useState([]);
+  const [view,     setView]     = React.useState("dashboard");
+  const [leadAtivo,setLA]       = React.useState(null);
+  const [modal,    setModal]    = React.useState(false);
+  const [modalEnc, setModalEnc] = React.useState(false);
+  const [fArea,    setFA]       = React.useState("todos");
+  const [fEtapa,   setFE]       = React.useState("todos");
+  const [fStatus,  setFS]       = React.useState("ativos"); // ativos | encerrados | todos
+  const [busca,    setBusca]    = React.useState("");
+  const [loading,  setLoading]  = React.useState(false);
+  const [status,   setStatus]   = React.useState(null);
+  const [toast,    setToast]    = React.useState({msg:"",tipo:"o"});
+
+  const showToast = (msg,tipo="o")=>{setToast({msg,tipo});setTimeout(()=>setToast({msg:"",tipo:"o"}),3500);};
+
+  React.useEffect(()=>{loadLeads();},[]);
+
+  async function loadLeads() {
+    setLoading(true);
+    try{const d=await api("listarLeads");setLeads(d||[]);setStatus(true);}
+    catch{setStatus(false);showToast("Não foi possível conectar ao Google Sheets.","e");}
+    finally{setLoading(false);}
+  }
+
+  const handleSalvarLead = React.useCallback(async(form)=>{
+    try{
+      const{id}=await api("salvarLead",{...form,historico:[{tipo:"Nota",texto:"Lead cadastrado via CRM.",autor:USUARIO}]});
+      setLeads(p=>[{...form,id,historico:[]}, ...p]);
+      setModal(false);
+      showToast("Lead salvo ✓");
+    }catch{showToast("Erro ao salvar lead.","e");}
+  },[]);
+
+  const atualizarCampo = React.useCallback(async(id,campo,valor)=>{
+    setLeads(p=>p.map(l=>l.id===id?{...l,[campo]:valor}:l));
+    try{await api("atualizarLead",{id,[campo]:valor});}
+    catch{showToast("Erro ao sincronizar.","w");}
+  },[]);
+
+  const adicionarNota = React.useCallback(async(leadId,texto)=>{
+    const item={leadId,tipo:"Nota",texto,autor:USUARIO,data:new Date().toLocaleString("pt-BR")};
+    setLeads(p=>p.map(l=>l.id===leadId?{...l,historico:[...(l.historico||[]),item]}:l));
+    try{await api("salvarInteracao",item);showToast("Nota salva ✓");}
+    catch{showToast("Erro ao salvar nota.","w");}
+  },[]);
+
+  // Encerrar lead: com ou sem contrato
+  const handleEncerrar = React.useCallback(async(id, tipo, valorRecebido)=>{
+    const updates = tipo==="com_contrato"
+      ? {etapa:"encerrado", valorRecebido: Number(valorRecebido)||0, valorEstimado:"", valorContrato:""}
+      : {etapa:"encerrado", valorRecebido:0, valorEstimado:"", valorContrato:""};
+
+    const nota = tipo==="com_contrato"
+      ? `Caso encerrado com contrato. Valor recebido: ${fR(valorRecebido)}.`
+      : "Caso encerrado sem contrato.";
+
+    setLeads(p=>p.map(l=>l.id===id?{...l,...updates,historico:[...(l.historico||[]),{tipo:"Nota",texto:nota,autor:USUARIO,data:new Date().toLocaleString("pt-BR")}]}:l));
+    setModalEnc(false);
+    setLA(null);
+    try{
+      await api("atualizarLead",{id,...updates});
+      await api("salvarInteracao",{leadId:id,tipo:"Nota",texto:nota,autor:USUARIO,data:new Date().toLocaleString("pt-BR")});
+      showToast(tipo==="com_contrato"?"Receita registrada ✓":"Lead encerrado sem contrato");
+    }catch{showToast("Erro ao encerrar lead.","w");}
+  },[]);
+
+  // Excluir lead definitivamente
+  const handleExcluir = React.useCallback(async(id)=>{
+    setLeads(p=>p.filter(l=>l.id!==id));
+    setModalEnc(false); setLA(null);
+    try{await api("deletarLead",{id});showToast("Lead excluído.");}
+    catch{showToast("Erro ao excluir.","w");}
+  },[]);
+
+  async function exportCSV() {
+    try{
+      const{csv}=await api("exportarCSV");
+      const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
+      const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="leads_matos_goncalves.csv";a.click();
+      showToast("CSV exportado ✓");
+    }catch{showToast("Erro ao exportar.","e");}
+  }
+
+  // ── Métricas financeiras ──────────────────────────────────
+  const fin = React.useMemo(()=>{
+    const pipeline = leads.filter(l=>ETAPAS.find(e=>e.id===l.etapa)?.fase==="pipeline");
+    const contratos= leads.filter(l=>ETAPAS.find(e=>e.id===l.etapa)?.fase==="contrato");
+    const encComContrato = leads.filter(l=>l.etapa==="encerrado"&&(Number(l.valorRecebido)||0)>0);
+    const encSemContrato = leads.filter(l=>l.etapa==="encerrado"&&!(Number(l.valorRecebido)||0));
+    return {
+      estimado:   pipeline.reduce((s,l)=>s+(Number(l.valorEstimado)||0),0),
+      contratado: contratos.reduce((s,l)=>s+(Number(l.valorContrato)||Number(l.valorEstimado)||0),0),
+      recebido:   encComContrato.reduce((s,l)=>s+(Number(l.valorRecebido)||0),0),
+      perdido:    encSemContrato.length,
+      nPipeline:  pipeline.length,
+      nContratos: contratos.length,
+      nRecebidos: encComContrato.length,
+    };
+  },[leads]);
+
+  const metrics = React.useMemo(()=>({
+    total:   leads.length,
+    ativos:  leads.filter(l=>l.etapa==="cliente_ativo").length,
+    urg:     leads.filter(l=>l.urgencia==="alta"&&l.etapa!=="encerrado").length,
+    novos:   leads.filter(l=>l.etapa==="novo_lead").length,
+    porArea: Object.keys(AREAS).map(a=>({area:a,n:leads.filter(l=>l.area===a&&l.etapa!=="encerrado").length})).filter(x=>x.n>0),
+  }),[leads]);
+
+  const filtered = React.useMemo(()=>leads.filter(l=>{
+    if(fStatus==="ativos"   && l.etapa==="encerrado") return false;
+    if(fStatus==="encerrados"&&l.etapa!=="encerrado") return false;
+    if(fArea!=="todos"&&l.area!==fArea) return false;
+    if(fEtapa!=="todos"&&l.etapa!==fEtapa) return false;
+    if(busca&&!l.nome?.toLowerCase().includes(busca.toLowerCase())&&!String(l.telefone).includes(busca)) return false;
+    return true;
+  }),[leads,fStatus,fArea,fEtapa,busca]);
+
+  const leadAtivoData = React.useMemo(()=>leads.find(l=>l.id===leadAtivo?.id)||leadAtivo,[leads,leadAtivo]);
+
+  return (
+    <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+      {toast.msg&&<div style={{position:"fixed",bottom:22,right:22,background:toast.tipo==="e"?"#E74C3C":toast.tipo==="w"?"#F39C12":"#1A7F5A",color:"#fff",padding:"11px 18px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:999,boxShadow:"0 4px 16px rgba(0,0,0,0.2)"}}>{toast.msg}</div>}
+      {modal&&<Modal onClose={()=>setModal(false)} onSave={handleSalvarLead}/>}
+      {modalEnc&&leadAtivoData&&<ModalEncerrar lead={leadAtivoData} onClose={()=>setModalEnc(false)} onEncerrar={handleEncerrar} onExcluir={handleExcluir}/>}
+      {leadAtivoData&&<Painel lead={leadAtivoData} onClose={()=>setLA(null)} onUpdateCampo={atualizarCampo} onAddNota={adicionarNota} onAbrirEncerrar={()=>setModalEnc(true)}/>}
+
+      {/* ── SIDEBAR ── */}
+      <div style={{width:220,background:"linear-gradient(180deg,#1A2444,#0F1629)",display:"flex",flexDirection:"column",flexShrink:0}}>
+        <div style={{padding:"22px 18px 18px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{fontSize:11,color:"#1A7F5A",fontWeight:800,letterSpacing:2,textTransform:"uppercase",marginBottom:3}}>⚖ MG</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#fff",letterSpacing:1.5,textTransform:"uppercase"}}>Matos & Gonçalves</div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,0.35)",marginTop:2}}>OAB/GO 55.469 · CRM v3.0</div>
+          <div style={{marginTop:7,display:"flex",alignItems:"center",gap:6}}>
+            <div style={{width:7,height:7,borderRadius:"50%",background:status===true?"#1A7F5A":status===false?"#E74C3C":"#F39C12"}}/>
+            <span style={{fontSize:10,color:"rgba(255,255,255,0.35)"}}>{status===true?"Sheets conectado":status===false?"Sheets offline":"Conectando..."}</span>
+          </div>
+        </div>
+
+        {[{icon:"◈",label:"Dashboard",id:"dashboard"},{icon:"☰",label:"Leads",id:"leads"},{icon:"⊞",label:"Kanban",id:"kanban"},{icon:"₢",label:"Financeiro",id:"financeiro"}].map(({icon,label,id})=>(
+          <div key={id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",margin:"2px 8px",borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:view===id?600:400,color:view===id?"#fff":"rgba(255,255,255,0.5)",background:view===id?"rgba(255,255,255,0.12)":"transparent",borderLeft:view===id?"3px solid #1A7F5A":"3px solid transparent"}}
+            onClick={()=>{setView(id);setLA(null);}}>
+            <span style={{fontSize:14}}>{icon}</span><span>{label}</span>
+          </div>
+        ))}
+
+        <div style={{padding:"16px 12px 6px",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1.5,textTransform:"uppercase",fontWeight:700}}>Áreas</div>
+        {Object.entries(AREAS).filter(([k])=>k!=="outros").map(([k,v])=>(
+          <div key={k} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 16px",margin:"2px 8px",borderRadius:8,cursor:"pointer",fontSize:12,color:"rgba(255,255,255,0.45)"}}
+            onClick={()=>{setFA(k);setView("leads");}}>
+            <span style={{color:v.color}}>{v.icon}</span><span>{v.label}</span>
+            <span style={{marginLeft:"auto",fontSize:11,fontWeight:700,color:v.color}}>{leads.filter(l=>l.area===k&&l.etapa!=="encerrado").length}</span>
+          </div>
+        ))}
+
+        <div style={{marginTop:"auto",padding:"14px 18px",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.3)"}}>Inhumas · GO</div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,0.2)",marginTop:2}}>100% Digital · CNJ 345/2020</div>
+        </div>
+      </div>
+
+      {/* ── MAIN ── */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {status===null&&<div style={{background:"#FEF9E7",borderBottom:"1px solid #F39C12",padding:"9px 24px",fontSize:13,color:"#7D5A00"}}>⏳ Conectando ao Google Sheets...</div>}
+        {status===false&&<div style={{background:"#FDEDEC",borderBottom:"1px solid #E74C3C",padding:"9px 24px",fontSize:13,color:"#7B241C",display:"flex",alignItems:"center",gap:12}}>
+          ⚠️ Sheets offline. <button style={{...S.btn("r"),padding:"4px 12px",fontSize:12}} onClick={loadLeads}>Reconectar</button>
+        </div>}
+
+        <div style={{background:"#fff",borderBottom:"1px solid #E8EBF0",padding:"13px 26px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div style={{fontSize:17,fontWeight:700,color:"#1A1D2E"}}>
+            {{dashboard:"Dashboard",leads:"Gestão de Leads",kanban:"Pipeline — Kanban",financeiro:"Controle Financeiro"}[view]}
+          </div>
+          <div style={{display:"flex",gap:9,alignItems:"center"}}>
+            <span style={{background:"#FDEDEC",color:"#E74C3C",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:700}}>{metrics.urg} urgentes</span>
+            <span style={{background:"#EAFAF1",color:"#1A7F5A",padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:700}}>{metrics.novos} novos</span>
+            <button style={S.btn("g")} onClick={()=>setModal(true)}>+ Novo Lead</button>
+          </div>
+        </div>
+
+        <div style={{flex:1,overflow:"auto",padding:24}}>
+
+          {/* ─ DASHBOARD ─ */}
+          {view==="dashboard"&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20}}>
+                {[
+                  {label:"Total de Leads",   value:metrics.total,        color:"#2C3E6E",sub:"na base"},
+                  {label:"Clientes Ativos",  value:metrics.ativos,       color:"#1A7F5A",sub:"contratos"},
+                  {label:"Urgentes",         value:metrics.urg,          color:"#E74C3C",sub:"prioridade alta"},
+                  {label:"Receita Realizada",value:fR(fin.recebido),     color:"#2980B9",sub:"casos encerrados"},
+                ].map((m,i)=>(
+                  <div key={i} style={S.mc(m.color)}>
+                    <div style={{fontSize:22,fontWeight:800,color:m.color}}>{m.value}</div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1A1D2E",marginTop:4}}>{m.label}</div>
+                    <div style={{fontSize:11,color:"#999",marginTop:2}}>{m.sub}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Funil financeiro resumido */}
+              <div style={{...S.card,marginBottom:20}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:16}}>Funil Financeiro</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1}}>
+                  {[
+                    {label:"Estimativa (pipeline)",valor:fin.estimado,n:fin.nPipeline,color:"#8E44AD",bg:"#F5EEF8"},
+                    {label:"Contratos firmados",   valor:fin.contratado,n:fin.nContratos,color:"#1A7F5A",bg:"#EAFAF1"},
+                    {label:"Receita realizada",    valor:fin.recebido,  n:fin.nRecebidos,color:"#2980B9",bg:"#EBF5FB"},
+                  ].map((f,i)=>(
+                    <div key={i} style={{background:f.bg,padding:16,borderRadius:i===0?"10px 0 0 10px":i===2?"0 10px 10px 0":"0",borderLeft:i>0?"1px solid #fff":"none",textAlign:"center"}}>
+                      <div style={{fontSize:11,fontWeight:700,color:f.color,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{f.label}</div>
+                      <div style={{fontSize:20,fontWeight:800,color:f.color}}>{fR(f.valor)}</div>
+                      <div style={{fontSize:11,color:f.color,opacity:0.7,marginTop:4}}>{f.n} caso(s)</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20}}>
+                <div style={S.card}>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>Leads Ativos por Área</div>
+                  {metrics.porArea.map(({area,n})=>(
+                    <div key={area} style={{marginBottom:11}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                        <span style={S.badge(area)}>{AREAS[area].icon} {AREAS[area].label}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:AREAS[area].color}}>{n}</span>
+                      </div>
+                      <div style={{background:"#F0F2F5",borderRadius:4,height:5}}>
+                        <div style={{width:`${leads.length?(n/leads.length)*100:0}%`,background:AREAS[area].color,height:5,borderRadius:4}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={S.card}>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>Pipeline</div>
+                  {ETAPAS.filter(e=>e.fase!=="encerrado").map(e=>{
+                    const n=leads.filter(l=>l.etapa===e.id).length;
+                    return <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:9}}>
+                      <div style={{width:9,height:9,borderRadius:"50%",background:e.color,flexShrink:0}}/>
+                      <span style={{fontSize:12,color:"#555",flex:1}}>{e.label}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:"#1A1D2E"}}>{n}</span>
+                    </div>;
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ─ FINANCEIRO ─ */}
+          {view==="financeiro"&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20}}>
+                {[
+                  {label:"Estimativa — Pipeline",  valor:fin.estimado,   n:fin.nPipeline,  color:"#8E44AD", sub:"Leads até proposta enviada"},
+                  {label:"Contratos Firmados",      valor:fin.contratado, n:fin.nContratos, color:"#1A7F5A", sub:"Clientes ativos"},
+                  {label:"Receita Realizada",       valor:fin.recebido,   n:fin.nRecebidos, color:"#2980B9", sub:"Casos encerrados pagos"},
+                ].map((f,i)=>(
+                  <div key={i} style={S.mc(f.color)}>
+                    <div style={{fontSize:11,fontWeight:700,color:f.color,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>{f.label}</div>
+                    <div style={{fontSize:26,fontWeight:800,color:f.color}}>{fR(f.valor)}</div>
+                    <div style={{fontSize:11,color:"#999",marginTop:6}}>{f.n} caso(s) · {f.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Leads em pipeline com valor */}
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:14,color:"#8E44AD"}}>📊 Estimativas em Pipeline</div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead><tr style={{borderBottom:"2px solid #F0F2F5"}}>
+                    {["Cliente","Área","Etapa","Valor Estimado"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:700,color:"#999",textTransform:"uppercase"}}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {leads.filter(l=>ETAPAS.find(e=>e.id===l.etapa)?.fase==="pipeline"&&Number(l.valorEstimado)>0)
+                      .sort((a,b)=>Number(b.valorEstimado)-Number(a.valorEstimado))
+                      .map(l=>(
+                        <tr key={l.id} style={{borderBottom:"1px solid #F5F7FA",cursor:"pointer"}} onClick={()=>setLA(l)}>
+                          <td style={{padding:"10px 10px",fontWeight:600}}>{l.nome}</td>
+                          <td style={{padding:"10px 10px"}}><span style={S.badge(l.area)}>{AREAS[l.area]?.label}</span></td>
+                          <td style={{padding:"10px 10px"}}><span style={S.etag(l.etapa)}>{ETAPAS.find(e=>e.id===l.etapa)?.label}</span></td>
+                          <td style={{padding:"10px 10px",fontWeight:700,color:"#8E44AD"}}>{fR(l.valorEstimado)}</td>
+                        </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Contratos ativos */}
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:14,color:"#1A7F5A"}}>✓ Contratos Firmados</div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead><tr style={{borderBottom:"2px solid #F0F2F5"}}>
+                    {["Cliente","Área","Valor Contrato","Era Estimado"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:700,color:"#999",textTransform:"uppercase"}}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {leads.filter(l=>l.etapa==="cliente_ativo").map(l=>(
+                      <tr key={l.id} style={{borderBottom:"1px solid #F5F7FA",cursor:"pointer"}} onClick={()=>setLA(l)}>
+                        <td style={{padding:"10px 10px",fontWeight:600}}>{l.nome}</td>
+                        <td style={{padding:"10px 10px"}}><span style={S.badge(l.area)}>{AREAS[l.area]?.label}</span></td>
+                        <td style={{padding:"10px 10px",fontWeight:700,color:"#1A7F5A"}}>{fR(l.valorContrato||l.valorEstimado)}</td>
+                        <td style={{padding:"10px 10px",color:"#999",textDecoration:l.valorContrato&&l.valorEstimado?"line-through":"none"}}>{l.valorEstimado?fR(l.valorEstimado):"—"}</td>
+                      </tr>
+                    ))}
+                    {leads.filter(l=>l.etapa==="cliente_ativo").length===0&&<tr><td colSpan={4} style={{padding:24,textAlign:"center",color:"#CCC",fontSize:13}}>Nenhum contrato ativo.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Receita realizada */}
+              <div style={S.card}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:14,color:"#2980B9"}}>💰 Receita Realizada</div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead><tr style={{borderBottom:"2px solid #F0F2F5"}}>
+                    {["Cliente","Área","Valor Recebido"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:700,color:"#999",textTransform:"uppercase"}}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {leads.filter(l=>l.etapa==="encerrado"&&Number(l.valorRecebido)>0)
+                      .sort((a,b)=>Number(b.valorRecebido)-Number(a.valorRecebido))
+                      .map(l=>(
+                        <tr key={l.id} style={{borderBottom:"1px solid #F5F7FA",cursor:"pointer"}} onClick={()=>setLA(l)}>
+                          <td style={{padding:"10px 10px",fontWeight:600}}>{l.nome}</td>
+                          <td style={{padding:"10px 10px"}}><span style={S.badge(l.area)}>{AREAS[l.area]?.label}</span></td>
+                          <td style={{padding:"10px 10px",fontWeight:700,color:"#2980B9"}}>{fR(l.valorRecebido)}</td>
+                        </tr>
+                    ))}
+                    {leads.filter(l=>l.etapa==="encerrado"&&Number(l.valorRecebido)>0).length===0&&<tr><td colSpan={3} style={{padding:24,textAlign:"center",color:"#CCC",fontSize:13}}>Nenhuma receita realizada ainda.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ─ LEADS ─ */}
+          {view==="leads"&&(
+            <div>
+              <div style={{display:"flex",gap:10,marginBottom:18,alignItems:"center",flexWrap:"wrap"}}>
+                <input style={{...S.inp,maxWidth:230}} placeholder="Buscar nome ou telefone..." value={busca} onChange={e=>setBusca(e.target.value)}/>
+                <select style={{...S.sel,maxWidth:140}} value={fStatus} onChange={e=>setFS(e.target.value)}>
+                  <option value="ativos">Ativos</option>
+                  <option value="encerrados">Encerrados</option>
+                  <option value="todos">Todos</option>
+                </select>
+                <select style={{...S.sel,maxWidth:155}} value={fArea} onChange={e=>setFA(e.target.value)}>
+                  <option value="todos">Todas as áreas</option>
+                  {Object.entries(AREAS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <select style={{...S.sel,maxWidth:155}} value={fEtapa} onChange={e=>setFE(e.target.value)}>
+                  <option value="todos">Todas as etapas</option>
+                  {ETAPAS.map(e=><option key={e.id} value={e.id}>{e.label}</option>)}
+                </select>
+                <span style={{fontSize:12,color:"#999",marginLeft:"auto"}}>{filtered.length} resultado(s)</span>
+                <button style={{...S.btn("o"),padding:"7px 13px",fontSize:12,border:"1.5px solid #E0E4EB"}} onClick={loadLeads}>↻</button>
+                <button style={{...S.btn("o"),padding:"7px 13px",fontSize:12,border:"1.5px solid #E0E4EB"}} onClick={exportCSV}>⬇ CSV</button>
+              </div>
+              <div style={S.card}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead><tr style={{borderBottom:"2px solid #F0F2F5"}}>
+                    {["Cliente","Telefone","Área","Etapa","Urgência","Valor",""].map(h=><th key={h} style={{padding:"9px 11px",textAlign:"left",fontSize:11,fontWeight:700,color:"#999",textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {filtered.map(l=>{
+                      const vr = valorRelevante(l);
+                      const fase = ETAPAS.find(e=>e.id===l.etapa)?.fase;
+                      const vColor = fase==="encerrado"?(vr>0?"#2980B9":"#AAA"):fase==="contrato"?"#1A7F5A":"#8E44AD";
+                      return(
+                        <tr key={l.id} style={{borderBottom:"1px solid #F5F7FA",opacity:fase==="encerrado"?0.75:1}}>
+                          <td style={{padding:"11px 11px",fontWeight:600}}>{l.nome}</td>
+                          <td style={{padding:"11px 11px",color:"#666"}}>{l.telefone}</td>
+                          <td style={{padding:"11px 11px"}}><span style={S.badge(l.area)}>{AREAS[l.area]?.label}</span></td>
+                          <td style={{padding:"11px 11px"}}><span style={S.etag(l.etapa)}>{ETAPAS.find(e=>e.id===l.etapa)?.label}</span></td>
+                          <td style={{padding:"11px 11px"}}>{fase!=="encerrado"?<span style={S.urg(l.urgencia)}>{URGENCIAS[l.urgencia]?.label}</span>:<span style={{fontSize:11,color:"#999"}}>—</span>}</td>
+                          <td style={{padding:"11px 11px",fontWeight:700,color:vColor,whiteSpace:"nowrap"}}>{vr>0?fR(vr):"—"}</td>
+                          <td style={{padding:"11px 11px"}}><button style={{...S.btn("o"),padding:"4px 12px",fontSize:12,border:"1.5px solid #E0E4EB"}} onClick={()=>setLA(l)}>Ver</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filtered.length===0&&<div style={{padding:36,textAlign:"center",color:"#BBB",fontSize:13}}>Nenhum lead encontrado.</div>}
+              </div>
+            </div>
+          )}
+
+          {/* ─ KANBAN ─ */}
+          {view==="kanban"&&(
+            <div style={{display:"flex",gap:12,overflowX:"auto",paddingBottom:12}}>
+              {ETAPAS.filter(et=>et.fase!=="encerrado").map(etapa=>{
+                const col=leads.filter(l=>l.etapa===etapa.id);
+                return <div key={etapa.id} style={{minWidth:220,background:"#F0F2F5",borderRadius:12,padding:11,flexShrink:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:11,padding:"6px 9px",background:"#fff",borderRadius:7,borderLeft:`4px solid ${etapa.color}`}}>
+                    <span style={{fontSize:13,fontWeight:700,flex:1,color:"#1A1D2E"}}>{etapa.label}</span>
+                    <span style={{fontSize:12,fontWeight:700,background:etapa.color,color:"#fff",borderRadius:20,padding:"1px 8px"}}>{col.length}</span>
+                  </div>
+                  {col.map(lead=>(
+                    <div key={lead.id} onClick={()=>setLA(lead)} style={{background:"#fff",borderRadius:9,padding:11,marginBottom:8,cursor:"pointer",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",borderTop:`3px solid ${AREAS[lead.area]?.color}`}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{lead.nome}</div>
+                      <div style={{fontSize:11,color:"#888",marginBottom:7}}>{lead.telefone}</div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        <span style={{...S.badge(lead.area),fontSize:10}}>{AREAS[lead.area]?.label}</span>
+                        <span style={{...S.urg(lead.urgencia),fontSize:10}}>{URGENCIAS[lead.urgencia]?.label}</span>
+                      </div>
+                      {Number(lead.valorEstimado)>0&&<div style={{fontSize:12,fontWeight:700,color:"#8E44AD",marginTop:7}}>{fR(lead.valorEstimado)}</div>}
+                    </div>
+                  ))}
+                  {col.length===0&&<div style={{padding:14,textAlign:"center",color:"#CCC",fontSize:12}}>Nenhum lead</div>}
+                </div>;
+              })}
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
