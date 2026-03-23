@@ -190,7 +190,7 @@ function ModalEncerrar({lead, onClose, onEncerrar, onExcluir}) {
 // ══════════════════════════════════════════════════════════════
 //  PAINEL LATERAL
 // ══════════════════════════════════════════════════════════════
-function Painel({lead, onClose, onUpdateCampo, onAddNota, onAbrirEncerrar}) {
+function Painel({lead, onClose, onUpdateCampo, onAddNota, onAbrirEncerrar, onAbrirAgendamento}) {
   const [nota,setNota] = React.useState("");
   const hist = lead.historico||[];
   const fase = ETAPAS.find(e=>e.id===lead.etapa)?.fase;
@@ -253,6 +253,11 @@ function Painel({lead, onClose, onUpdateCampo, onAddNota, onAbrirEncerrar}) {
           <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{lead.telefone}</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {fase!=="encerrado" && (
+            <button onClick={onAbrirAgendamento} style={{background:"rgba(26,127,90,0.25)",border:"1px solid rgba(26,127,90,0.5)",color:"#A8EDCB",padding:"5px 12px",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:600}}>
+              📅 Agendar
+            </button>
+          )}
           {fase!=="encerrado" && (
             <button onClick={onAbrirEncerrar} style={{background:"rgba(231,76,60,0.2)",border:"1px solid rgba(231,76,60,0.4)",color:"#E74C3C",padding:"5px 12px",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:600}}>
               Encerrar
@@ -326,6 +331,125 @@ function Painel({lead, onClose, onUpdateCampo, onAddNota, onAbrirEncerrar}) {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  MODAL AGENDAMENTO — definido FORA do App
+// ══════════════════════════════════════════════════════════════
+function ModalAgendamento({ lead, onClose, onAgendado }) {
+  const hoje = new Date();
+  const amanha = new Date(hoje); amanha.setDate(hoje.getDate()+1);
+  const dataDefault = amanha.toISOString().split("T")[0];
+
+  const [data,     setData]    = React.useState(dataDefault);
+  const [horaIni,  setHoraIni] = React.useState("09:00");
+  const [horaFim,  setHoraFim] = React.useState("10:00");
+  const [obs,      setObs]     = React.useState("");
+  const [saving,   setSaving]  = React.useState(false);
+  const [resultado,setResult]  = React.useState(null);
+
+  const handle = async () => {
+    if (!data || !horaIni || !horaFim) { alert("Preencha data e horário."); return; }
+    setSaving(true);
+    try {
+      const dataInicio = `${data}T${horaIni}:00-03:00`;
+      const dataFim    = `${data}T${horaFim}:00-03:00`;
+      const res = await api("criarEvento", {
+        leadId:      lead.id,
+        nomeCliente: lead.nome,
+        telefone:    lead.telefone,
+        area:        lead.area,
+        advogado:    lead.advogado,
+        dataInicio, dataFim,
+        descricao:   obs,
+        titulo:      `Consulta — ${lead.nome}`,
+      });
+      setResult(res);
+      onAgendado(lead.id, `${data.split("-").reverse().join("/")} às ${horaIni}`);
+    } catch(e) {
+      alert("Erro ao criar evento: " + e.message);
+    } finally { setSaving(false); }
+  };
+
+  const S2 = {
+    inp: {width:"100%",padding:"9px 11px",borderRadius:8,border:"1.5px solid #E0E4EB",fontSize:13,color:"#1A1D2E",background:"#FAFBFC",outline:"none"},
+    lbl: {fontSize:12,fontWeight:600,color:"#666",marginBottom:5,display:"block"},
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:30,width:440}}>
+        {!resultado ? (
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:17,fontWeight:700,color:"#1A1D2E"}}>Agendar Consulta</div>
+                <div style={{fontSize:13,color:"#888",marginTop:2}}>{lead.nome}</div>
+              </div>
+              <button onClick={onClose} style={{background:"#F0F2F5",border:"none",width:30,height:30,borderRadius:7,cursor:"pointer",fontSize:19,lineHeight:1}}>×</button>
+            </div>
+
+            <div style={{background:"#EBF5FB",borderRadius:10,padding:12,marginBottom:18,fontSize:13,color:"#154360"}}>
+              O evento será criado no seu <strong>Google Calendar</strong> com os dados do cliente já preenchidos.
+            </div>
+
+            <div style={{marginBottom:14}}>
+              <label style={S2.lbl}>Data da consulta</label>
+              <input style={S2.inp} type="date" value={data} min={dataDefault} onChange={e=>setData(e.target.value)}/>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+              <div>
+                <label style={S2.lbl}>Horário de início</label>
+                <input style={S2.inp} type="time" value={horaIni} onChange={e=>setHoraIni(e.target.value)}/>
+              </div>
+              <div>
+                <label style={S2.lbl}>Horário de término</label>
+                <input style={S2.inp} type="time" value={horaFim} onChange={e=>setHoraFim(e.target.value)}/>
+              </div>
+            </div>
+
+            <div style={{marginBottom:20}}>
+              <label style={S2.lbl}>Observações (opcional)</label>
+              <textarea style={{...S2.inp,minHeight:70,resize:"vertical"}} value={obs} onChange={e=>setObs(e.target.value)} placeholder="Documentos necessários, assunto específico..."/>
+            </div>
+
+            <div style={{background:"#F8F9FB",borderRadius:10,padding:12,marginBottom:20,fontSize:12,color:"#555"}}>
+              <div style={{fontWeight:700,marginBottom:4,color:"#333"}}>Resumo do evento</div>
+              <div>📅 {data ? new Date(data+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long"}) : "—"}</div>
+              <div>🕐 {horaIni} – {horaFim}</div>
+              <div>👤 {lead.nome} · {lead.telefone}</div>
+              <div>⚖ {lead.advogado}</div>
+            </div>
+
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #E0E4EB",background:"#F0F2F5",color:"#555",fontSize:13,fontWeight:600,cursor:"pointer"}} onClick={onClose}>Cancelar</button>
+              <button style={{padding:"8px 18px",borderRadius:8,border:"none",background:"#1A7F5A",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}} onClick={handle} disabled={saving}>
+                {saving ? "Criando evento..." : "Agendar no Google Calendar"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{textAlign:"center",padding:"10px 0 20px"}}>
+              <div style={{fontSize:40,marginBottom:12}}>✅</div>
+              <div style={{fontSize:17,fontWeight:700,color:"#1A7F5A",marginBottom:6}}>Consulta agendada!</div>
+              <div style={{fontSize:13,color:"#666",marginBottom:20}}>{resultado.titulo}</div>
+              <div style={{background:"#EAFAF1",borderRadius:10,padding:14,marginBottom:20,fontSize:13,color:"#1A5E3A",textAlign:"left"}}>
+                <div>📅 {new Date(resultado.inicio).toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long"})}</div>
+                <div>🕐 {new Date(resultado.inicio).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})} – {new Date(resultado.fim).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</div>
+                <div>👤 {lead.nome}</div>
+              </div>
+              <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                <a href="https://calendar.google.com" target="_blank" style={{padding:"8px 16px",borderRadius:8,background:"#EBF5FB",color:"#2980B9",fontSize:13,fontWeight:600,textDecoration:"none"}}>Abrir Google Calendar</a>
+                <button style={{padding:"8px 16px",borderRadius:8,border:"none",background:"#1A7F5A",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}} onClick={onClose}>Fechar</button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 //  APP
 // ══════════════════════════════════════════════════════════════
 function App() {
@@ -334,6 +458,7 @@ function App() {
   const [leadAtivo,setLA]       = React.useState(null);
   const [modal,    setModal]    = React.useState(false);
   const [modalEnc, setModalEnc] = React.useState(false);
+  const [modalAge, setModalAge] = React.useState(false);
   const [fArea,    setFA]       = React.useState("todos");
   const [fEtapa,   setFE]       = React.useState("todos");
   const [fStatus,  setFS]       = React.useState("ativos"); // ativos | encerrados | todos
@@ -396,6 +521,21 @@ function App() {
   },[]);
 
   // Excluir lead definitivamente
+  const handleAgendado = React.useCallback(async(leadId, dataHora) => {
+    const nota = `Consulta agendada: ${dataHora}. Evento criado no Google Calendar.`;
+    const item = {leadId, tipo:"Nota", texto:nota, autor:USUARIO, data:new Date().toLocaleString("pt-BR")};
+    setLeads(p=>p.map(l=>l.id===leadId
+      ? {...l, etapa:"consulta_agendada", historico:[...(l.historico||[]),item]}
+      : l
+    ));
+    setModalAge(false);
+    try {
+      await api("atualizarLead",{id:leadId, etapa:"consulta_agendada"});
+      await api("salvarInteracao",item);
+      showToast("Consulta agendada no Google Calendar ✓");
+    } catch { showToast("Evento criado, mas erro ao sincronizar Sheets.","w"); }
+  },[]);
+
   const handleExcluir = React.useCallback(async(id)=>{
     setLeads(p=>p.filter(l=>l.id!==id));
     setModalEnc(false); setLA(null);
@@ -453,7 +593,8 @@ function App() {
       {toast.msg&&<div style={{position:"fixed",bottom:22,right:22,background:toast.tipo==="e"?"#E74C3C":toast.tipo==="w"?"#F39C12":"#1A7F5A",color:"#fff",padding:"11px 18px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:999,boxShadow:"0 4px 16px rgba(0,0,0,0.2)"}}>{toast.msg}</div>}
       {modal&&<Modal onClose={()=>setModal(false)} onSave={handleSalvarLead}/>}
       {modalEnc&&leadAtivoData&&<ModalEncerrar lead={leadAtivoData} onClose={()=>setModalEnc(false)} onEncerrar={handleEncerrar} onExcluir={handleExcluir}/>}
-      {leadAtivoData&&<Painel lead={leadAtivoData} onClose={()=>setLA(null)} onUpdateCampo={atualizarCampo} onAddNota={adicionarNota} onAbrirEncerrar={()=>setModalEnc(true)}/>}
+      {modalAge&&leadAtivoData&&<ModalAgendamento lead={leadAtivoData} onClose={()=>setModalAge(false)} onAgendado={handleAgendado}/>}
+      {leadAtivoData&&<Painel lead={leadAtivoData} onClose={()=>setLA(null)} onUpdateCampo={atualizarCampo} onAddNota={adicionarNota} onAbrirEncerrar={()=>setModalEnc(true)} onAbrirAgendamento={()=>setModalAge(true)}/>}
 
       {/* ── SIDEBAR ── */}
       <div style={{width:220,background:"linear-gradient(180deg,#1A2444,#0F1629)",display:"flex",flexDirection:"column",flexShrink:0}}>
