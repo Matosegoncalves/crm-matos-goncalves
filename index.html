@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CRM — Matos & Gonçalves Advocacia</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',sans-serif;background:#F0F2F5;}
+  ::-webkit-scrollbar{width:6px;height:6px;}
+  ::-webkit-scrollbar-track{background:#F0F2F5;}
+  ::-webkit-scrollbar-thumb{background:#C0C4CC;border-radius:3px;}
+  select,input,textarea,button{font-family:inherit;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .ap{animation:pulse 2s infinite;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxySmvHdDURN053jBi0LJtwMQmOp777ktl8HLOsrU_bfIQnFGH0Ameq363VZMk4xFlm/exec";
+const USUARIO = "Dr. Marcelo Gonçalves";
+
+const ETAPAS = [
+  {id:"lead_recebido",     label:"Lead Recebido",     color:"#95A5A6"},
+  {id:"qualificacao",      label:"Qualificação",      color:"#F39C12"},
+  {id:"consulta_agendada", label:"Consulta Agendada", color:"#8E44AD"},
+  {id:"proposta_enviada",  label:"Proposta Enviada",  color:"#2980B9"},
+  {id:"follow_up",         label:"Follow-up",         color:"#E67E22"},
+  {id:"fechado",           label:"Fechado",           color:"#27AE60"},
+  {id:"perdido",           label:"Perdido",           color:"#E74C3C"},
+];
+
+const AREAS = {
+  fraude_pix:        {label:"Fraude PIX",          color:"#E74C3C", bg:"#FDEDEC", icon:"₿"},
+  acidente_trabalho: {label:"Acidente de Trabalho",color:"#E67E22", bg:"#FEF9E7", icon:"⚕"},
+  credito_rural:     {label:"Crédito Rural",       color:"#27AE60", bg:"#EAFAF1", icon:"🌾"},
+  direito_digital:   {label:"Direito Digital",     color:"#2980B9", bg:"#EBF5FB", icon:"⚡"},
+  outros:            {label:"Outros",              color:"#7F8C8D", bg:"#F2F3F4", icon:"§"},
+};
+
+const TEMPS = {
+  quente:{label:"Quente",icon:"🔥",color:"#E74C3C",bg:"#FDEDEC"},
+  morno: {label:"Morno", icon:"🌡",color:"#E67E22",bg:"#FEF9E7"},
+  frio:  {label:"Frio",  icon:"❄", color:"#2980B9",bg:"#EBF5FB"},
+};
+
+const URGS = {
+  alta: {label:"Alta", color:"#E74C3C",bg:"#FDEDEC"},
+  media:{label:"Média",color:"#E67E22",bg:"#FEF9E7"},
+  baixa:{label:"Baixa",color:"#27AE60",bg:"#EAFAF1"},
+};
+
+const ORIGENS   = ["WhatsApp","Instagram","Site","Google Ads","Indicação","Ligação"];
+const ADVOGADOS = ["Dr. Marcelo Gonçalves","Dra. Manuelle Mellina Matos","Dr. Associado"];
+const MOTIVOS_PERDA   = ["Preço","Desconfiança","Sumiu","Fechou com outro","Não tinha caso","Outro"];
+const STATUS_FOLLOWUP = ["Aguardando resposta","Visualizou e não respondeu","Disse que vai pensar","Respondeu"];
+const FORMAS_PAG      = ["À vista","Parcelado","Honorários contingenciais","Outro"];
+
+const LEAD0 = {
+  nome:"",telefone:"",origem:"WhatsApp",area:"fraude_pix",tipoCaso:"",
+  valorEnvolvido:"",urgencia:"media",temperatura:"",outroAdvogado:"nao",
+  temProvas:"nao",etapa:"lead_recebido",advogado:USUARIO,observacoes:"",
+  dataEntrada:new Date().toISOString().split("T")[0],proximaAcao:"",
+  motivoPerda:"",valorFechado:"",formaPagamento:"",contratoAssinado:"nao",
+  followupStatus:"",isAgro:"nao",tipoAcidente:"",tipoDigital:"",seguidores:"",
+};
+
+function classificarTemp(lead) {
+  const valor = Number(lead.valorEnvolvido)||0;
+  const {area,isAgro,tipoAcidente,tipoDigital,temProvas,urgencia} = lead;
+  if (isAgro==="sim") return "quente";
+  if (area==="fraude_pix") { if(valor>=20000) return "quente"; if(valor>=10000) return "morno"; return "frio"; }
+  if (area==="direito_digital") {
+    if(tipoDigital==="exposicao_intimidade"||tipoDigital==="influencer") return "quente";
+    if(tipoDigital==="recuperar_acesso"||tipoDigital==="usuario_fake") return "morno";
+    return "frio";
+  }
+  if (area==="acidente_trabalho") { if(tipoAcidente==="grave") return "quente"; if(tipoAcidente==="medio") return "morno"; return "frio"; }
+  if (area==="credito_rural") { if(valor>=50000) return "quente"; if(valor>=10000) return "morno"; return "frio"; }
+  if (temProvas==="nao"&&urgencia==="baixa") return "frio";
+  return "morno";
+}
+
+const fR = v => v?`R$ ${Number(v).toLocaleString("pt-BR")}`:"—";
+const fD = d => {if(!d)return"—";const s=String(d);if(s.includes("/"))return s;return new Date(s+"T12:00:00").toLocaleDateString("pt-BR");};
+
+function diasParado(lead) {
+  const d = lead.ultimaInteracao||lead.dataEntrada;
+  if(!d) return 0;
+  const dt = new Date(d.includes("/")?d.split("/").reverse().join("-"):d);
+  return Math.floor((Date.now()-dt.getTime())/86400000);
+}
+
+function alertaParado(lead) {
+  if(lead.etapa==="fechado"||lead.etapa==="perdido") return null;
+  const dias = diasParado(lead);
+  if(dias>=3) return {msg:`Parado há ${dias} dias`,color:"#E74C3C"};
+  if(dias>=1) return {msg:"Parado há 24h",color:"#E67E22"};
+  return null;
+}
+
+function calcFollowups(lead) {
+  if(!lead.dataEntrada) return [];
+  const base = new Date(lead.dataEntrada.includes("/")?lead.dataEntrada.split("/").reverse().join("-"):lead.dataEntrada);
+  return [1,3,7].map(d=>{const dt=new Date(base);dt.setDate(dt.getDate()+d);return{dia:`D+${d}`,data:dt.toLocaleDateString("pt-BR"),passou:dt<new Date()};});
+}
+
+async function api(acao,payload={}) {
+  const r=await fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({acao,payload})});
+  const j=await r.json();
+  if(!j.sucesso) throw new Error(j.erro||"Erro");
+  return j.dados;
+}
+
+const S = {
+  btn:(v="p")=>({padding:"8px 15px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,whiteSpace:"nowrap",
+       background:v==="p"?"#2C3E6E":v==="g"?"#1A7F5A":v==="r"?"#E74C3C":v==="a"?"#E67E22":"#F0F2F5",color:v==="o"?"#555":"#fff"}),
+  inp:{width:"100%",padding:"9px 11px",borderRadius:8,border:"1.5px solid #E0E4EB",fontSize:13,color:"#1A1D2E",background:"#FAFBFC",outline:"none"},
+  sel:{width:"100%",padding:"9px 11px",borderRadius:8,border:"1.5px solid #E0E4EB",fontSize:13,color:"#1A1D2E",background:"#FAFBFC",outline:"none",cursor:"pointer"},
+  lbl:{fontSize:12,fontWeight:600,color:"#666",marginBottom:5,display:"block"},
+  card:{background:"#fff",borderRadius:14,padding:22,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginBottom:16},
+  mc:(c)=>({background:"#fff",borderRadius:14,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",borderTop:`4px solid ${c}`}),
+  badge:(a)=>({display:"inline-flex",alignItems:"center",gap:3,padding:"3px 8px",borderRadius:20,fontSize:11,fontWeight:600,background:AREAS[a]?.bg||"#eee",color:AREAS[a]?.color||"#666"}),
+  temp:(t)=>({display:"inline-flex",alignItems:"center",gap:3,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:TEMPS[t]?.bg||"#eee",color:TEMPS[t]?.color||"#666"}),
+  urg:(u)=>({display:"inline-block",padding:"2px 7px",borderRadius:20,fontSize:11,fontWeight:600,background:URGS[u]?.bg||"#eee",color:URGS[u]?.color||"#666"}),
+  etag:(e)=>{const et=ETAPAS.find(x=>x.id===e);return{display:"inline-block",padding:"2px 7px",borderRadius:6,fontSize:11,fontWeight:600,background:(et?.color||"#999")+"22",color:et?.color||"#999"};},
+};
+
+// ── MODAL NOVO LEAD ─────────────────────────────────────────
+function Modal({onClose,onSave}) {
+  const [form,setForm]=React.useState({...LEAD0});
+  const [saving,setSaving]=React.useState(false);
+  const set=k=>e=>setForm(f=>({...f,[k]:e.target.value}));
+  const tempAuto=React.useMemo(()=>classificarTemp(form),[form]);
+  const handle=async()=>{
+    if(!form.nome||!form.telefone){alert("Nome e telefone obrigatórios.");return;}
+    setSaving(true);
+    await onSave({...form,temperatura:form.temperatura||tempAuto});
+    setSaving(false);setForm({...LEAD0});
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:12}}>
+      <div style={{background:"#fff",borderRadius:16,padding:26,width:580,maxHeight:"92vh",overflow:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+          <div style={{fontSize:16,fontWeight:700}}>Novo Lead</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <span style={S.temp(tempAuto)}>{TEMPS[tempAuto]?.icon} {TEMPS[tempAuto]?.label} — automático</span>
+            <button onClick={onClose} style={{background:"#F0F2F5",border:"none",width:28,height:28,borderRadius:7,cursor:"pointer",fontSize:18}}>×</button>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div><label style={S.lbl}>Nome completo *</label><input style={S.inp} value={form.nome} onChange={set("nome")} placeholder="Nome do cliente"/></div>
+          <div><label style={S.lbl}>Telefone *</label><input style={S.inp} value={form.telefone} onChange={set("telefone")} placeholder="(62) 9..."/></div>
+          <div><label style={S.lbl}>Origem</label><select style={S.sel} value={form.origem} onChange={set("origem")}>{ORIGENS.map(o=><option key={o} value={o}>{o}</option>)}</select></div>
+          <div><label style={S.lbl}>Área do Direito</label><select style={S.sel} value={form.area} onChange={set("area")}>{Object.entries(AREAS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
+
+          {form.area==="fraude_pix"&&<><div><label style={S.lbl}>Tipo de caso PIX</label><input style={S.inp} value={form.tipoCaso} onChange={set("tipoCaso")} placeholder="Ex: golpe conta, falso banco..."/></div><div><label style={S.lbl}>Valor envolvido (R$)</label><input style={S.inp} type="number" value={form.valorEnvolvido} onChange={set("valorEnvolvido")}/></div></>}
+          {form.area==="acidente_trabalho"&&<><div><label style={S.lbl}>Gravidade</label><select style={S.sel} value={form.tipoAcidente} onChange={set("tipoAcidente")}><option value="">Selecione...</option><option value="grave">Grave (amputação/incapacitante)</option><option value="medio">Médio (limitante)</option><option value="leve">Leve</option></select></div><div><label style={S.lbl}>Valor estimado (R$)</label><input style={S.inp} type="number" value={form.valorEnvolvido} onChange={set("valorEnvolvido")}/></div></>}
+          {form.area==="credito_rural"&&<><div><label style={S.lbl}>É agronegócio?</label><select style={S.sel} value={form.isAgro} onChange={set("isAgro")}><option value="nao">Não</option><option value="sim">Sim — Agronegócio</option></select></div><div><label style={S.lbl}>Valor da dívida (R$)</label><input style={S.inp} type="number" value={form.valorEnvolvido} onChange={set("valorEnvolvido")}/></div></>}
+          {form.area==="direito_digital"&&<><div><label style={S.lbl}>Tipo do caso digital</label><select style={S.sel} value={form.tipoDigital} onChange={set("tipoDigital")}><option value="">Selecione...</option><option value="exposicao_intimidade">Exposição de intimidade</option><option value="influencer">Influencer (alto engajamento)</option><option value="recuperar_acesso">Recuperar acesso a conta</option><option value="usuario_fake">Identificar usuário fake</option><option value="lgpd">LGPD / Dados</option><option value="outro">Outro</option></select></div><div><label style={S.lbl}>Seguidores (se influencer)</label><input style={S.inp} type="number" value={form.seguidores} onChange={set("seguidores")} placeholder="Nº de seguidores"/></div></>}
+
+          <div><label style={S.lbl}>Urgência</label><select style={S.sel} value={form.urgencia} onChange={set("urgencia")}><option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option></select></div>
+          <div><label style={S.lbl}>Já falou com outro advogado?</label><select style={S.sel} value={form.outroAdvogado} onChange={set("outroAdvogado")}><option value="nao">Não</option><option value="sim">Sim</option></select></div>
+          <div><label style={S.lbl}>Tem provas?</label><select style={S.sel} value={form.temProvas} onChange={set("temProvas")}><option value="nao">Não</option><option value="sim">Sim</option><option value="parcial">Parcialmente</option></select></div>
+          <div><label style={S.lbl}>Advogado responsável</label><select style={S.sel} value={form.advogado} onChange={set("advogado")}>{ADVOGADOS.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
+          <div><label style={S.lbl}>Próxima ação</label><input style={S.inp} type="date" value={form.proximaAcao} onChange={set("proximaAcao")}/></div>
+          <div><label style={S.lbl}>Data de entrada</label><input style={S.inp} type="date" value={form.dataEntrada} onChange={set("dataEntrada")}/></div>
+        </div>
+        <div style={{marginTop:12}}><label style={S.lbl}>Observações</label><textarea style={{...S.inp,minHeight:65,resize:"vertical"}} value={form.observacoes} onChange={set("observacoes")} placeholder="Detalhes do caso..."/></div>
+        <div style={{display:"flex",gap:10,marginTop:18,justifyContent:"flex-end"}}>
+          <button style={{...S.btn("o"),border:"1.5px solid #E0E4EB"}} onClick={onClose}>Cancelar</button>
+          <button style={S.btn("p")} onClick={handle} disabled={saving}>{saving?"Salvando...":"Cadastrar Lead"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL ENCERRAR ──────────────────────────────────────────
+function ModalEncerrar({lead,onClose,onFechado,onPerdido,onExcluir}) {
+  const [tipo,setTipo]=React.useState("fechado");
+  const [valor,setValor]=React.useState(lead.valorEnvolvido||"");
+  const [forma,setForma]=React.useState("À vista");
+  const [motivo,setMotivo]=React.useState("Preço");
+  const [saving,setSaving]=React.useState(false);
+  const handle=async()=>{setSaving(true);if(tipo==="fechado")await onFechado(lead.id,valor,forma);else await onPerdido(lead.id,motivo);setSaving(false);};
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:26,width:420}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:3}}>Encerrar Lead</div>
+        <div style={{fontSize:12,color:"#888",marginBottom:18}}>{lead.nome}</div>
+        <div style={{display:"flex",gap:10,marginBottom:18}}>
+          {[["fechado","Contrato fechado","#1A7F5A"],["perdido","Lead perdido","#E74C3C"]].map(([v,l,c])=>(
+            <div key={v} onClick={()=>setTipo(v)} style={{flex:1,padding:"12px 8px",borderRadius:10,border:`2px solid ${tipo===v?c:"#E0E4EB"}`,cursor:"pointer",textAlign:"center",background:tipo===v?c+"11":"#fff"}}>
+              <div style={{fontSize:18,marginBottom:3}}>{v==="fechado"?"✓":"✗"}</div>
+              <div style={{fontSize:12,fontWeight:700,color:tipo===v?c:"#555"}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {tipo==="fechado"&&<><div style={{marginBottom:10}}><label style={S.lbl}>Valor fechado (R$)</label><input style={S.inp} type="number" value={valor} onChange={e=>setValor(e.target.value)}/></div><div style={{marginBottom:14}}><label style={S.lbl}>Forma de pagamento</label><select style={S.sel} value={forma} onChange={e=>setForma(e.target.value)}>{FORMAS_PAG.map(f=><option key={f} value={f}>{f}</option>)}</select></div></>}
+        {tipo==="perdido"&&<div style={{marginBottom:14}}><label style={S.lbl}>Motivo da perda</label><select style={S.sel} value={motivo} onChange={e=>setMotivo(e.target.value)}>{MOTIVOS_PERDA.map(m=><option key={m} value={m}>{m}</option>)}</select></div>}
+        <div style={{display:"flex",gap:10,justifyContent:"space-between"}}>
+          <button style={{...S.btn("r"),padding:"6px 12px",fontSize:11}} onClick={()=>{if(window.confirm("Excluir permanentemente?"))onExcluir(lead.id);}}>Excluir</button>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...S.btn("o"),border:"1.5px solid #E0E4EB"}} onClick={onClose}>Cancelar</button>
+            <button style={S.btn(tipo==="fechado"?"g":"r")} onClick={handle} disabled={saving}>{saving?"Salvando...":tipo==="fechado"?"Confirmar Contrato":"Registrar Perda"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL AGENDAMENTO ───────────────────────────────────────
+function ModalAgendamento({lead,onClose,onAgendado}) {
+  const amanha=new Date();amanha.setDate(amanha.getDate()+1);
+  const [data,setData]=React.useState(amanha.toISOString().split("T")[0]);
+  const [ini,setIni]=React.useState("09:00");
+  const [fim,setFim]=React.useState("10:00");
+  const [obs,setObs]=React.useState("");
+  const [saving,setSaving]=React.useState(false);
+  const [ok,setOk]=React.useState(false);
+  const handle=async()=>{
+    setSaving(true);
+    try{await api("criarEvento",{leadId:lead.id,nomeCliente:lead.nome,telefone:lead.telefone,area:lead.area,advogado:lead.advogado,dataInicio:`${data}T${ini}:00-03:00`,dataFim:`${data}T${fim}:00-03:00`,descricao:obs,titulo:`Consulta — ${lead.nome}`});await onAgendado(lead.id,`${data.split("-").reverse().join("/")} às ${ini}`);setOk(true);}
+    catch(e){alert("Erro: "+e.message);}
+    setSaving(false);
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:26,width:400}}>
+        {!ok?<>
+          <div style={{fontSize:16,fontWeight:700,marginBottom:3}}>Agendar Consulta</div>
+          <div style={{fontSize:12,color:"#888",marginBottom:16}}>{lead.nome}</div>
+          <div style={{marginBottom:10}}><label style={S.lbl}>Data</label><input style={S.inp} type="date" value={data} onChange={e=>setData(e.target.value)}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><label style={S.lbl}>Início</label><input style={S.inp} type="time" value={ini} onChange={e=>setIni(e.target.value)}/></div>
+            <div><label style={S.lbl}>Término</label><input style={S.inp} type="time" value={fim} onChange={e=>setFim(e.target.value)}/></div>
+          </div>
+          <div style={{marginBottom:16}}><label style={S.lbl}>Observações</label><textarea style={{...S.inp,minHeight:55,resize:"vertical"}} value={obs} onChange={e=>setObs(e.target.value)}/></div>
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+            <button style={{...S.btn("o"),border:"1.5px solid #E0E4EB"}} onClick={onClose}>Cancelar</button>
+            <button style={S.btn("g")} onClick={handle} disabled={saving}>{saving?"Criando...":"Agendar no Calendar"}</button>
+          </div>
+        </>:<div style={{textAlign:"center",padding:"10px 0"}}><div style={{fontSize:36,marginBottom:10}}>✅</div><div style={{fontSize:15,fontWeight:700,color:"#1A7F5A",marginBottom:12}}>Consulta agendada!</div><button style={S.btn("g")} onClick={onClose}>Fechar</button></div>}
+      </div>
+    </div>
+  );
+}
+
+// ── PAINEL LATERAL ──────────────────────────────────────────
+function Painel({lead,onClose,onUpdate,onAddNota,onAbrirEncerrar,onAgendar}) {
+  const [nota,setNota]=React.useState("");
+  const hist=lead.historico||[];
+  const temp=lead.temperatura||classificarTemp(lead);
+  const alerta=alertaParado(lead);
+  const followups=calcFollowups(lead);
+  const enc=lead.etapa==="fechado"||lead.etapa==="perdido";
+  const handleAdd=()=>{if(!nota.trim())return;onAddNota(lead.id,nota);setNota("");};
+  return(
+    <div style={{position:"fixed",top:0,right:0,width:480,height:"100vh",background:"#fff",boxShadow:"-4px 0 24px rgba(0,0,0,0.14)",zIndex:100,display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"14px 18px",background:"#1A2444",flexShrink:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+          <div><div style={{fontSize:14,fontWeight:700,color:"#fff",marginBottom:2}}>{lead.nome}</div><div style={{fontSize:11,color:"rgba(255,255,255,0.5)"}}>{lead.telefone} · {lead.origem}</div></div>
+          <div style={{display:"flex",gap:5,alignItems:"center"}}>
+            {!enc&&<button onClick={onAgendar} style={{background:"rgba(26,127,90,0.25)",border:"1px solid rgba(26,127,90,0.5)",color:"#A8EDCB",padding:"4px 9px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:600}}>📅 Agendar</button>}
+            {!enc&&<button onClick={onAbrirEncerrar} style={{background:"rgba(231,76,60,0.2)",border:"1px solid rgba(231,76,60,0.4)",color:"#E74C3C",padding:"4px 9px",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:600}}>Encerrar</button>}
+            <button onClick={onClose} style={{background:"rgba(255,255,255,0.12)",border:"none",color:"#fff",width:26,height:26,borderRadius:6,cursor:"pointer",fontSize:16}}>×</button>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+          <span style={S.badge(lead.area)}>{AREAS[lead.area]?.icon} {AREAS[lead.area]?.label}</span>
+          <span style={S.temp(temp)}>{TEMPS[temp]?.icon} {TEMPS[temp]?.label}</span>
+          <span style={S.urg(lead.urgencia)}>{URGS[lead.urgencia]?.label}</span>
+          <span style={S.etag(lead.etapa)}>{ETAPAS.find(e=>e.id===lead.etapa)?.label}</span>
+        </div>
+      </div>
+      <div style={{flex:1,overflow:"auto",padding:16}}>
+        {alerta&&<div style={{background:alerta.color+"11",border:`1px solid ${alerta.color}33`,borderRadius:8,padding:"7px 11px",marginBottom:12,display:"flex",alignItems:"center",gap:7}}><span className="ap">⚠️</span><span style={{fontSize:12,fontWeight:600,color:alerta.color}}>{alerta.msg} sem interação</span></div>}
+
+        {!enc&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:12}}>
+          <div><label style={S.lbl}>Etapa</label><select style={S.sel} value={lead.etapa} onChange={e=>onUpdate(lead.id,"etapa",e.target.value)}>{ETAPAS.filter(et=>et.id!=="fechado"&&et.id!=="perdido").map(et=><option key={et.id} value={et.id}>{et.label}</option>)}</select></div>
+          <div><label style={S.lbl}>Temperatura</label><select style={S.sel} value={temp} onChange={e=>onUpdate(lead.id,"temperatura",e.target.value)}>{Object.entries(TEMPS).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</select></div>
+        </div>}
+
+        <div style={{background:"#F8F9FB",borderRadius:10,padding:12,marginBottom:12}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:0.5,marginBottom:9}}>Dados do Caso</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[["Valor envolvido",fR(lead.valorEnvolvido)],lead.etapa==="fechado"?["Valor fechado",fR(lead.valorFechado)]:["Próxima ação",fD(lead.proximaAcao)],["Tem provas",lead.temProvas==="sim"?"Sim":lead.temProvas==="parcial"?"Parcial":"Não"],["Outro advogado",lead.outroAdvogado==="sim"?"Sim":"Não"]].map(([k,v])=>(
+              <div key={k} style={{background:"#fff",borderRadius:7,padding:8}}>
+                <div style={{fontSize:9,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:0.4,marginBottom:2}}>{k}</div>
+                <div style={{fontSize:12,fontWeight:600,color:"#1A1D2E"}}>{v||"—"}</div>
+              </div>
+            ))}
+          </div>
+          {lead.observacoes&&<div style={{marginTop:8,fontSize:12,color:"#444",lineHeight:1.6,background:"#fff",borderRadius:7,padding:8}}>{lead.observacoes}</div>}
+        </div>
+
+        {(lead.etapa==="follow_up"||lead.etapa==="proposta_enviada")&&<div style={{background:"#FEF9E7",borderRadius:10,padding:12,marginBottom:12,border:"1px solid #F39C1233"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#7D5A00",textTransform:"uppercase",letterSpacing:0.5,marginBottom:9}}>Follow-up</div>
+          <div style={{display:"flex",gap:7,marginBottom:9}}>
+            {followups.map(f=><div key={f.dia} style={{flex:1,background:f.passou?"#FDEDEC":"#EAFAF1",borderRadius:7,padding:"7px 5px",textAlign:"center"}}><div style={{fontSize:11,fontWeight:700,color:f.passou?"#E74C3C":"#1A7F5A"}}>{f.dia}</div><div style={{fontSize:9,color:"#666",marginTop:2}}>{f.data}</div></div>)}
+          </div>
+          <select style={S.sel} value={lead.followupStatus||""} onChange={e=>onUpdate(lead.id,"followupStatus",e.target.value)}>
+            <option value="">Status do follow-up...</option>
+            {STATUS_FOLLOWUP.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>}
+
+        {lead.etapa==="perdido"&&lead.motivoPerda&&<div style={{background:"#FDEDEC",borderRadius:10,padding:12,marginBottom:12}}><div style={{fontSize:10,fontWeight:700,color:"#7B241C",textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>Motivo da perda</div><div style={{fontSize:13,fontWeight:600,color:"#E74C3C"}}>{lead.motivoPerda}</div></div>}
+
+        {lead.etapa==="fechado"&&<div style={{background:"#EAFAF1",borderRadius:10,padding:12,marginBottom:12,border:"1px solid #A9DFBF"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#1A5E3A",textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>Contrato Fechado</div>
+          <div style={{fontSize:16,fontWeight:800,color:"#1A7F5A"}}>{fR(lead.valorFechado)}</div>
+          <div style={{fontSize:11,color:"#1A5E3A",marginTop:2}}>{lead.formaPagamento}</div>
+        </div>}
+
+        <div style={{fontSize:12,fontWeight:700,marginBottom:9}}>Histórico</div>
+        <div style={{maxHeight:180,overflow:"auto",marginBottom:10}}>
+          {[...hist].reverse().map((h,i)=>(
+            <div key={i} style={{display:"flex",gap:7,marginBottom:9,paddingBottom:9,borderBottom:i<hist.length-1?"1px solid #F5F7FA":"none"}}>
+              <div style={{width:26,height:26,borderRadius:6,background:"#EEF2FF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0}}>{h.tipo==="WhatsApp"?"💬":h.tipo==="Ligação"?"📞":h.tipo==="Email"?"✉️":"📝"}</div>
+              <div style={{flex:1}}><div style={{fontSize:10,color:"#999",marginBottom:1}}>{h.data} · {h.tipo}</div><div style={{fontSize:11,color:"#444",lineHeight:1.5}}>{h.texto}</div></div>
+            </div>
+          ))}
+          {hist.length===0&&<div style={{color:"#CCC",fontSize:11,textAlign:"center",padding:10}}>Sem interações ainda.</div>}
+        </div>
+        {!enc&&<div style={{display:"flex",gap:7}}><input style={{...S.inp,flex:1,fontSize:12}} placeholder="Adicionar nota..." value={nota} onChange={e=>setNota(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleAdd()}/><button style={S.btn("g")} onClick={handleAdd}>+</button></div>}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  APP
+// ══════════════════════════════════════════════════════════════
+function App() {
+  const [leads,   setLeads]   = React.useState([]);
+  const [view,    setView]    = React.useState("dashboard");
+  const [leadAtivo,setLA]     = React.useState(null);
+  const [modal,   setModal]   = React.useState(false);
+  const [modalEnc,setME]      = React.useState(false);
+  const [modalAge,setMA]      = React.useState(false);
+  const [fArea,   setFA]      = React.useState("todos");
+  const [fEtapa,  setFE]      = React.useState("todos");
+  const [fTemp,   setFT]      = React.useState("todos");
+  const [fStatus, setFS]      = React.useState("ativos");
+  const [busca,   setBusca]   = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [connSt,  setConnSt]  = React.useState(null);
+  const [toast,   setToast]   = React.useState({msg:"",tipo:"o"});
+
+  const showToast=(msg,tipo="o")=>{setToast({msg,tipo});setTimeout(()=>setToast({msg:"",tipo:"o"}),3500);};
+
+  React.useEffect(()=>{loadLeads();},[]);
+
+  async function loadLeads() {
+    setLoading(true);
+    try{const d=await api("listarLeads");setLeads(d||[]);setConnSt(true);}
+    catch{setConnSt(false);showToast("Não foi possível conectar ao Google Sheets.","e");}
+    finally{setLoading(false);}
+  }
+
+  const salvarLead=React.useCallback(async(form)=>{
+    try{const{id}=await api("salvarLead",{...form,historico:[{tipo:"Nota",texto:"Lead cadastrado via CRM.",autor:USUARIO}]});setLeads(p=>[{...form,id,historico:[]}, ...p]);setModal(false);showToast("Lead salvo ✓");}
+    catch{showToast("Erro ao salvar.","e");}
+  },[]);
+
+  const updateField=React.useCallback(async(id,campo,valor)=>{
+    setLeads(p=>p.map(l=>l.id===id?{...l,[campo]:valor}:l));
+    try{await api("atualizarLead",{id,[campo]:valor});}
+    catch{showToast("Erro ao sincronizar.","w");}
+  },[]);
+
+  const addNota=React.useCallback(async(leadId,texto)=>{
+    const item={leadId,tipo:"Nota",texto,autor:USUARIO,data:new Date().toLocaleString("pt-BR")};
+    setLeads(p=>p.map(l=>l.id===leadId?{...l,historico:[...(l.historico||[]),item],ultimaInteracao:new Date().toISOString().split("T")[0]}:l));
+    try{await api("salvarInteracao",item);showToast("Nota salva ✓");}
+    catch{showToast("Erro.","w");}
+  },[]);
+
+  const onFechado=React.useCallback(async(id,valorFechado,formaPagamento)=>{
+    const nota=`Contrato assinado. Valor: ${fR(valorFechado)}. ${formaPagamento}.`;
+    setLeads(p=>p.map(l=>l.id===id?{...l,etapa:"fechado",valorFechado,formaPagamento,historico:[...(l.historico||[]),{tipo:"Nota",texto:nota,autor:USUARIO,data:new Date().toLocaleString("pt-BR")}]}:l));
+    setME(false);setLA(null);
+    try{await api("atualizarLead",{id,etapa:"fechado",valorFechado,formaPagamento});showToast("Contrato registrado ✓");}
+    catch{showToast("Erro.","w");}
+  },[]);
+
+  const onPerdido=React.useCallback(async(id,motivoPerda)=>{
+    setLeads(p=>p.map(l=>l.id===id?{...l,etapa:"perdido",motivoPerda,historico:[...(l.historico||[]),{tipo:"Nota",texto:`Lead perdido: ${motivoPerda}.`,autor:USUARIO,data:new Date().toLocaleString("pt-BR")}]}:l));
+    setME(false);setLA(null);
+    try{await api("atualizarLead",{id,etapa:"perdido",motivoPerda});showToast("Lead marcado como perdido.");}
+    catch{showToast("Erro.","w");}
+  },[]);
+
+  const onExcluir=React.useCallback(async(id)=>{
+    setLeads(p=>p.filter(l=>l.id!==id));setME(false);setLA(null);
+    try{await api("deletarLead",{id});showToast("Lead excluído.");}
+    catch{showToast("Erro.","w");}
+  },[]);
+
+  const onAgendado=React.useCallback(async(leadId,dataHora)=>{
+    const item={leadId,tipo:"Nota",texto:`Consulta agendada: ${dataHora}.`,autor:USUARIO,data:new Date().toLocaleString("pt-BR")};
+    setLeads(p=>p.map(l=>l.id===leadId?{...l,etapa:"consulta_agendada",historico:[...(l.historico||[]),item]}:l));
+    setMA(false);
+    try{await api("atualizarLead",{id:leadId,etapa:"consulta_agendada"});await api("salvarInteracao",item);showToast("Consulta agendada ✓");}
+    catch{showToast("Erro.","w");}
+  },[]);
+
+  async function exportCSV(){
+    try{const{csv}=await api("exportarCSV");const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="leads_matos_goncalves.csv";a.click();showToast("CSV exportado ✓");}
+    catch{showToast("Erro.","e");}
+  }
+
+  const metrics=React.useMemo(()=>{
+    const ativos=leads.filter(l=>l.etapa!=="fechado"&&l.etapa!=="perdido");
+    const fechados=leads.filter(l=>l.etapa==="fechado");
+    const perdidos=leads.filter(l=>l.etapa==="perdido");
+    const quentes=ativos.filter(l=>(l.temperatura||classificarTemp(l))==="quente");
+    const hoje=new Date().toISOString().split("T")[0];
+    const semana=new Date();semana.setDate(semana.getDate()-7);
+    const alertas=ativos.filter(l=>diasParado(l)>=1);
+    const porOrigem=ORIGENS.map(o=>({origem:o,total:leads.filter(l=>l.origem===o).length,fechados:fechados.filter(l=>l.origem===o).length})).filter(x=>x.total>0).sort((a,b)=>b.fechados-a.fechados);
+    const motivosPerda=MOTIVOS_PERDA.map(m=>({motivo:m,count:perdidos.filter(l=>l.motivoPerda===m).length})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count);
+    return{
+      ativos:ativos.length,fechados:fechados.length,perdidos:perdidos.length,
+      quentes:quentes.length,leadsHoje:leads.filter(l=>l.dataEntrada===hoje).length,
+      leadsSemana:leads.filter(l=>{const d=new Date(l.dataEntrada);return d>=semana;}).length,
+      taxaFech:leads.length>0?((fechados.length/leads.length)*100).toFixed(1):"0.0",
+      ticketMedio:fechados.length>0?fechados.reduce((s,l)=>s+(Number(l.valorFechado)||0),0)/fechados.length:0,
+      receitaTotal:fechados.reduce((s,l)=>s+(Number(l.valorFechado)||0),0),
+      alertas,porOrigem,motivosPerda,
+    };
+  },[leads]);
+
+  const filtered=React.useMemo(()=>leads.filter(l=>{
+    if(fStatus==="ativos"&&(l.etapa==="fechado"||l.etapa==="perdido"))return false;
+    if(fStatus==="fechados"&&l.etapa!=="fechado")return false;
+    if(fStatus==="perdidos"&&l.etapa!=="perdido")return false;
+    if(fArea!=="todos"&&l.area!==fArea)return false;
+    if(fEtapa!=="todos"&&l.etapa!==fEtapa)return false;
+    if(fTemp!=="todos"&&(l.temperatura||classificarTemp(l))!==fTemp)return false;
+    if(busca&&!l.nome?.toLowerCase().includes(busca.toLowerCase())&&!String(l.telefone).includes(busca))return false;
+    return true;
+  }),[leads,fStatus,fArea,fEtapa,fTemp,busca]);
+
+  const leadAtivoData=React.useMemo(()=>leads.find(l=>l.id===leadAtivo?.id)||leadAtivo,[leads,leadAtivo]);
+
+  const Dashboard=()=>(
+    <div>
+      {metrics.alertas.length>0&&<div style={{background:"#FDEDEC",borderRadius:12,padding:14,marginBottom:16,border:"1px solid #F1948A"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#922B21",marginBottom:9}}>⚠️ {metrics.alertas.length} lead(s) parado(s)</div>
+        {metrics.alertas.slice(0,5).map(l=>{const a=alertaParado(l);return<div key={l.id} onClick={()=>{setLA(l);setView("leads");}} style={{display:"flex",justifyContent:"space-between",padding:"6px 9px",background:"#fff",borderRadius:7,marginBottom:5,cursor:"pointer",fontSize:12}}><span style={{fontWeight:600}}>{l.nome}</span><span style={{color:a?.color,fontWeight:600}}>{a?.msg}</span></div>;})}
+      </div>}
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+        {[{label:"Leads Ativos",value:metrics.ativos,color:"#2C3E6E",sub:"em pipeline"},{label:"Leads Quentes",value:metrics.quentes,color:"#E74C3C",sub:"prioridade"},{label:"Taxa Fechamento",value:metrics.taxaFech+"%",color:"#1A7F5A",sub:"do total"},{label:"Ticket Médio",value:fR(metrics.ticketMedio),color:"#E67E22",sub:"contratos"}].map((m,i)=>(
+          <div key={i} style={S.mc(m.color)}><div style={{fontSize:20,fontWeight:800,color:m.color}}>{m.value}</div><div style={{fontSize:11,fontWeight:600,color:"#1A1D2E",marginTop:4}}>{m.label}</div><div style={{fontSize:10,color:"#999",marginTop:2}}>{m.sub}</div></div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
+        {[{label:"Leads Hoje",value:metrics.leadsHoje,color:"#8E44AD"},{label:"Esta Semana",value:metrics.leadsSemana,color:"#2980B9"},{label:"Receita Total",value:fR(metrics.receitaTotal),color:"#1A7F5A"}].map((m,i)=>(
+          <div key={i} style={S.mc(m.color)}><div style={{fontSize:20,fontWeight:800,color:m.color}}>{m.value}</div><div style={{fontSize:11,fontWeight:600,color:"#1A1D2E",marginTop:4}}>{m.label}</div></div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Pipeline por Etapa</div>
+          {ETAPAS.map(e=>{const n=leads.filter(l=>l.etapa===e.id).length;return<div key={e.id} style={{display:"flex",alignItems:"center",gap:9,marginBottom:8}}><div style={{width:7,height:7,borderRadius:"50%",background:e.color,flexShrink:0}}/><span style={{fontSize:12,color:"#555",flex:1}}>{e.label}</span><div style={{background:e.color+"22",borderRadius:20,padding:"1px 7px",fontSize:11,fontWeight:700,color:e.color}}>{n}</div></div>;})}
+        </div>
+        <div style={S.card}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Temperatura</div>
+          {Object.entries(TEMPS).map(([k,v])=>{const n=leads.filter(l=>(l.temperatura||classificarTemp(l))===k&&l.etapa!=="fechado"&&l.etapa!=="perdido").length;return<div key={k} style={{display:"flex",alignItems:"center",gap:9,marginBottom:11}}><span style={{fontSize:16}}>{v.icon}</span><div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:12,fontWeight:600,color:v.color}}>{v.label}</span><span style={{fontSize:12,fontWeight:700,color:v.color}}>{n}</span></div><div style={{background:"#F0F2F5",borderRadius:4,height:4}}><div style={{width:`${leads.length?(n/leads.length)*100:0}%`,background:v.color,height:4,borderRadius:4}}/></div></div></div>;})}
+          <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #F0F2F5"}}>
+            <div style={{fontSize:12,fontWeight:700,marginBottom:9}}>Por Área</div>
+            {Object.entries(AREAS).map(([k,v])=>{const n=leads.filter(l=>l.area===k&&l.etapa!=="fechado"&&l.etapa!=="perdido").length;if(!n)return null;return<div key={k} style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}><span style={S.badge(k)}>{v.icon} {v.label}</span><span style={{fontSize:11,fontWeight:700,color:v.color,marginLeft:"auto"}}>{n}</span></div>;})}
+          </div>
+        </div>
+      </div>
+
+      {metrics.porOrigem.length>0&&<div style={S.card}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Origem que Mais Converte</div>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{borderBottom:"2px solid #F0F2F5"}}>{["Origem","Leads","Fechados","Taxa"].map(h=><th key={h} style={{padding:"6px 9px",textAlign:"left",fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+          <tbody>{metrics.porOrigem.map((o,i)=><tr key={o.origem} style={{borderBottom:"1px solid #F5F7FA",background:i%2===0?"#fff":"#FAFBFC"}}><td style={{padding:"8px 9px",fontWeight:600}}>{o.origem}</td><td style={{padding:"8px 9px"}}>{o.total}</td><td style={{padding:"8px 9px",color:"#1A7F5A",fontWeight:600}}>{o.fechados}</td><td style={{padding:"8px 9px",fontWeight:700,color:o.total>0&&(o.fechados/o.total)>0.3?"#1A7F5A":"#E67E22"}}>{o.total>0?((o.fechados/o.total)*100).toFixed(0)+"%":"—"}</td></tr>)}</tbody>
+        </table>
+      </div>}
+
+      {metrics.motivosPerda.length>0&&<div style={S.card}>
+        <div style={{fontSize:13,fontWeight:700,marginBottom:12}}>Análise de Perdas</div>
+        {metrics.motivosPerda.map(({motivo,count})=><div key={motivo} style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}><span style={{fontSize:12,color:"#555"}}>{motivo}</span><span style={{fontSize:12,fontWeight:700,color:"#E74C3C"}}>{count} ({metrics.perdidos>0?((count/metrics.perdidos)*100).toFixed(0):0}%)</span></div><div style={{background:"#F0F2F5",borderRadius:4,height:4}}><div style={{width:`${metrics.perdidos>0?(count/metrics.perdidos)*100:0}%`,background:"#E74C3C",height:4,borderRadius:4}}/></div></div>)}
+      </div>}
+    </div>
+  );
+
+  const LeadsView=()=>(
+    <div>
+      <div style={{display:"flex",gap:9,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <input style={{...S.inp,maxWidth:200,fontSize:12}} placeholder="Buscar..." value={busca} onChange={e=>setBusca(e.target.value)}/>
+        <select style={{...S.sel,maxWidth:110,fontSize:12}} value={fStatus} onChange={e=>setFS(e.target.value)}><option value="ativos">Ativos</option><option value="fechados">Fechados</option><option value="perdidos">Perdidos</option><option value="todos">Todos</option></select>
+        <select style={{...S.sel,maxWidth:115,fontSize:12}} value={fTemp} onChange={e=>setFT(e.target.value)}><option value="todos">Temperatura</option>{Object.entries(TEMPS).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</select>
+        <select style={{...S.sel,maxWidth:135,fontSize:12}} value={fArea} onChange={e=>setFA(e.target.value)}><option value="todos">Todas as áreas</option>{Object.entries(AREAS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select>
+        <select style={{...S.sel,maxWidth:145,fontSize:12}} value={fEtapa} onChange={e=>setFE(e.target.value)}><option value="todos">Todas as etapas</option>{ETAPAS.map(e=><option key={e.id} value={e.id}>{e.label}</option>)}</select>
+        <span style={{fontSize:11,color:"#999",marginLeft:"auto"}}>{filtered.length}</span>
+        <button style={{...S.btn("o"),padding:"6px 11px",fontSize:11,border:"1.5px solid #E0E4EB"}} onClick={loadLeads}>↻</button>
+        <button style={{...S.btn("o"),padding:"6px 11px",fontSize:11,border:"1.5px solid #E0E4EB"}} onClick={exportCSV}>⬇ CSV</button>
+      </div>
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{borderBottom:"2px solid #F0F2F5"}}>{["","Cliente","Área","Etapa","Temp","Urg","Valor","Parado",""].map(h=><th key={h} style={{padding:"7px 8px",textAlign:"left",fontSize:10,fontWeight:700,color:"#999",textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+          <tbody>{filtered.map(l=>{
+            const temp=l.temperatura||classificarTemp(l);
+            const al=alertaParado(l);
+            const dias=diasParado(l);
+            return<tr key={l.id} style={{borderBottom:"1px solid #F5F7FA",opacity:l.etapa==="perdido"?0.6:1}}>
+              <td style={{padding:"9px 5px 9px 9px"}}>{al&&<div style={{width:7,height:7,borderRadius:"50%",background:al.color}} className="ap"/>}</td>
+              <td style={{padding:"9px 9px",fontWeight:600}}>{l.nome}<div style={{fontSize:10,color:"#999"}}>{l.telefone}</div></td>
+              <td style={{padding:"9px 9px"}}><span style={S.badge(l.area)}>{AREAS[l.area]?.label}</span></td>
+              <td style={{padding:"9px 9px"}}><span style={S.etag(l.etapa)}>{ETAPAS.find(e=>e.id===l.etapa)?.label}</span></td>
+              <td style={{padding:"9px 5px"}}><span style={S.temp(temp)}>{TEMPS[temp]?.icon}</span></td>
+              <td style={{padding:"9px 5px"}}><span style={S.urg(l.urgencia)}>{URGS[l.urgencia]?.label}</span></td>
+              <td style={{padding:"9px 9px",fontWeight:600,color:"#1A7F5A",fontSize:11,whiteSpace:"nowrap"}}>{fR(l.valorEnvolvido)}</td>
+              <td style={{padding:"9px 5px",fontSize:11,color:dias>=3?"#E74C3C":dias>=1?"#E67E22":"#999"}}>{dias>0?`${dias}d`:""}</td>
+              <td style={{padding:"9px 9px"}}><button style={{...S.btn("o"),padding:"3px 9px",fontSize:11,border:"1.5px solid #E0E4EB"}} onClick={()=>setLA(l)}>Ver</button></td>
+            </tr>;
+          })}</tbody>
+        </table>
+        {filtered.length===0&&<div style={{padding:32,textAlign:"center",color:"#BBB",fontSize:12}}>Nenhum lead encontrado.</div>}
+      </div>
+    </div>
+  );
+
+  const KanbanView=()=>(
+    <div style={{display:"flex",gap:11,overflowX:"auto",paddingBottom:12}}>
+      {ETAPAS.map(etapa=>{
+        const col=filtered.filter(l=>l.etapa===etapa.id);
+        return<div key={etapa.id} style={{minWidth:210,background:"#F0F2F5",borderRadius:12,padding:10,flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:10,padding:"5px 8px",background:"#fff",borderRadius:7,borderLeft:`4px solid ${etapa.color}`}}>
+            <span style={{fontSize:12,fontWeight:700,flex:1,color:"#1A1D2E"}}>{etapa.label}</span>
+            <span style={{fontSize:11,fontWeight:700,background:etapa.color,color:"#fff",borderRadius:20,padding:"1px 7px"}}>{col.length}</span>
+          </div>
+          {col.map(lead=>{
+            const temp=lead.temperatura||classificarTemp(lead);
+            const al=alertaParado(lead);
+            return<div key={lead.id} onClick={()=>setLA(lead)} style={{background:"#fff",borderRadius:9,padding:10,marginBottom:7,cursor:"pointer",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",borderTop:`3px solid ${AREAS[lead.area]?.color}`}}>
+              {al&&<div style={{fontSize:10,color:al.color,fontWeight:700,marginBottom:3}} className="ap">⚠️ {al.msg}</div>}
+              <div style={{fontWeight:600,fontSize:12,marginBottom:3}}>{lead.nome}</div>
+              <div style={{fontSize:10,color:"#888",marginBottom:6}}>{lead.telefone}</div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                <span style={{...S.badge(lead.area),fontSize:10}}>{AREAS[lead.area]?.label}</span>
+                <span style={{...S.temp(temp),fontSize:10}}>{TEMPS[temp]?.icon}</span>
+              </div>
+              {lead.valorEnvolvido&&<div style={{fontSize:10,fontWeight:700,color:"#1A7F5A",marginTop:6}}>{fR(lead.valorEnvolvido)}</div>}
+            </div>;
+          })}
+          {col.length===0&&<div style={{padding:12,textAlign:"center",color:"#CCC",fontSize:11}}>Nenhum lead</div>}
+        </div>;
+      })}
+    </div>
+  );
+
+  const titles={dashboard:"Dashboard",leads:"Gestão de Leads",kanban:"Pipeline — Kanban"};
+
+  return(
+    <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+      {toast.msg&&<div style={{position:"fixed",bottom:20,right:20,background:toast.tipo==="e"?"#E74C3C":toast.tipo==="w"?"#F39C12":"#1A7F5A",color:"#fff",padding:"10px 16px",borderRadius:10,fontSize:13,fontWeight:600,zIndex:999,boxShadow:"0 4px 16px rgba(0,0,0,0.2)"}}>{toast.msg}</div>}
+      {modal&&<Modal onClose={()=>setModal(false)} onSave={salvarLead}/>}
+      {modalEnc&&leadAtivoData&&<ModalEncerrar lead={leadAtivoData} onClose={()=>setME(false)} onFechado={onFechado} onPerdido={onPerdido} onExcluir={onExcluir}/>}
+      {modalAge&&leadAtivoData&&<ModalAgendamento lead={leadAtivoData} onClose={()=>setMA(false)} onAgendado={onAgendado}/>}
+      {leadAtivoData&&<Painel lead={leadAtivoData} onClose={()=>setLA(null)} onUpdate={updateField} onAddNota={addNota} onAbrirEncerrar={()=>setME(true)} onAgendar={()=>setMA(true)}/>}
+
+      {/* SIDEBAR */}
+      <div style={{width:215,background:"linear-gradient(180deg,#1A2444,#0F1629)",display:"flex",flexDirection:"column",flexShrink:0}}>
+        <div style={{padding:"18px 14px 14px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{fontSize:9,color:"#1A7F5A",fontWeight:800,letterSpacing:2,textTransform:"uppercase",marginBottom:2}}>⚖ MG</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#fff",letterSpacing:1.2,textTransform:"uppercase"}}>Matos & Gonçalves</div>
+          <div style={{fontSize:9,color:"rgba(255,255,255,0.35)",marginTop:1}}>OAB/GO 55.469 · CRM v4.0</div>
+          <div style={{marginTop:7,display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:connSt===true?"#1A7F5A":connSt===false?"#E74C3C":"#F39C12"}}/>
+            <span style={{fontSize:9,color:"rgba(255,255,255,0.35)"}}>{connSt===true?"Sheets conectado":connSt===false?"Offline":"Conectando..."}</span>
+          </div>
+          {metrics.alertas.length>0&&<div style={{marginTop:7,background:"rgba(231,76,60,0.2)",borderRadius:6,padding:"4px 7px",display:"flex",alignItems:"center",gap:5}} className="ap">
+            <span style={{fontSize:10,color:"#E74C3C",fontWeight:700}}>⚠️ {metrics.alertas.length} parado(s)</span>
+          </div>}
+        </div>
+
+        {[{icon:"◈",label:"Dashboard",id:"dashboard"},{icon:"☰",label:"Leads",id:"leads"},{icon:"⊞",label:"Kanban",id:"kanban"}].map(({icon,label,id})=>(
+          <div key={id} style={{display:"flex",alignItems:"center",gap:9,padding:"9px 14px",margin:"2px 7px",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:view===id?600:400,color:view===id?"#fff":"rgba(255,255,255,0.5)",background:view===id?"rgba(255,255,255,0.12)":"transparent",borderLeft:view===id?"3px solid #1A7F5A":"3px solid transparent"}}
+            onClick={()=>{setView(id);setLA(null);}}>
+            <span style={{fontSize:13}}>{icon}</span><span>{label}</span>
+          </div>
+        ))}
+
+        <div style={{padding:"12px 11px 4px",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:1.5,textTransform:"uppercase",fontWeight:700}}>Temperatura</div>
+        {Object.entries(TEMPS).map(([k,v])=>{
+          const n=leads.filter(l=>(l.temperatura||classificarTemp(l))===k&&l.etapa!=="fechado"&&l.etapa!=="perdido").length;
+          return<div key={k} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 14px",margin:"1px 7px",borderRadius:8,cursor:"pointer",fontSize:11,color:"rgba(255,255,255,0.45)"}} onClick={()=>{setFT(k);setView("leads");}}>
+            <span style={{fontSize:13}}>{v.icon}</span><span>{v.label}</span>
+            <span style={{marginLeft:"auto",fontSize:10,fontWeight:700,color:v.color}}>{n}</span>
+          </div>;
+        })}
+
+        <div style={{padding:"12px 11px 4px",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:1.5,textTransform:"uppercase",fontWeight:700}}>Áreas</div>
+        {Object.entries(AREAS).filter(([k])=>k!=="outros").map(([k,v])=>(
+          <div key={k} style={{display:"flex",alignItems:"center",gap:7,padding:"5px 14px",margin:"1px 7px",borderRadius:8,cursor:"pointer",fontSize:10,color:"rgba(255,255,255,0.4)"}} onClick={()=>{setFA(k);setView("leads");}}>
+            <span style={{color:v.color,fontSize:11}}>{v.icon}</span><span>{v.label}</span>
+            <span style={{marginLeft:"auto",fontSize:9,fontWeight:700,color:v.color}}>{leads.filter(l=>l.area===k&&l.etapa!=="fechado"&&l.etapa!=="perdido").length}</span>
+          </div>
+        ))}
+
+        <div style={{marginTop:"auto",padding:"11px 14px",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{fontSize:9,color:"rgba(255,255,255,0.3)"}}>Inhumas · GO · 100% Digital</div>
+        </div>
+      </div>
+
+      {/* MAIN */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {connSt===null&&<div style={{background:"#FEF9E7",borderBottom:"1px solid #F39C12",padding:"7px 20px",fontSize:11,color:"#7D5A00"}}>⏳ Conectando ao Google Sheets...</div>}
+        {connSt===false&&<div style={{background:"#FDEDEC",borderBottom:"1px solid #E74C3C",padding:"7px 20px",fontSize:11,color:"#7B241C",display:"flex",alignItems:"center",gap:9}}>⚠️ Sheets offline.<button style={{...S.btn("r"),padding:"2px 9px",fontSize:10}} onClick={loadLeads}>Reconectar</button></div>}
+        <div style={{background:"#fff",borderBottom:"1px solid #E8EBF0",padding:"11px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div style={{fontSize:15,fontWeight:700,color:"#1A1D2E"}}>{titles[view]}</div>
+          <div style={{display:"flex",gap:7,alignItems:"center"}}>
+            <span style={{background:"#FDEDEC",color:"#E74C3C",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700}}>🔥 {metrics.quentes}</span>
+            <span style={{background:"#EAFAF1",color:"#1A7F5A",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700}}>{metrics.ativos} ativos</span>
+            <button style={S.btn("g")} onClick={()=>setModal(true)}>+ Novo Lead</button>
+          </div>
+        </div>
+        <div style={{flex:1,overflow:"auto",padding:20}}>
+          {view==="dashboard"&&<Dashboard/>}
+          {view==="leads"&&<LeadsView/>}
+          {view==="kanban"&&<KanbanView/>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
